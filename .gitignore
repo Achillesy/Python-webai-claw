@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+.muse-pipe-token
+.muse-pipe-client.env
+*.log
+.DS_Store
+.vscode/
+*.pem
+native-host/com.webai.claw.json
+native-host/exec_history.json
+native-host/log/
+local-archive/
+extension/*.bak
+*.bak
+
+# store submission artifacts (reproducible via store/build.sh)
+store/*.zip
+
+# extension build artifacts (available via GitHub Releases)
+dist/

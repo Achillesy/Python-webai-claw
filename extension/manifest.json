@@ -1,0 +1,41 @@
+{
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "webai-claw"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "adapters/muse.js",
+        "adapters/deepseek.js",
+        "content.js"
+      ],
+      "matches": [
+        "https://muse.ai/*",
+        "https://chat.deepseek.com/*"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "description": "Give web AI claws on your computer \u2014 turn Q&A into output.",
+  "host_permissions": [
+    "https://muse.ai/*",
+    "https://chat.deepseek.com/*"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApHRXiO3vBQKdEsgkvtUEfuKFn3VmoV6ni1BRelgCUBfqf9C0bVZWjznIGg5qnDbzdLVx0oQN3kLLNiFwR10pxmY9YhBqxgukaKL5l/Hot1IVK1py3HBI+mUsqYp/N8RM4wxMFMEhS8d/vMSX+YvtjZBETTH9f8CA+RIbR05cuwK11nfPeICiuFLeiV9T8gBPflujppCThr3p1N3GcRrnlTF5dIgSuqJ3/o9r3jtdlOutRYBLJw/3PolUlOQvh8S8SPXSSXJX+8GMnCj7ktVrceZh8VdSLv3fnEBAuMaxCmZ0Mz7U141eOGLY5YwJ8hkv2wCFAEiiuhcPCuEFEtDXjwIDAQAB",
+  "manifest_version": 3,
+  "name": "webai-claw",
+  "permissions": [
+    "nativeMessaging",
+    "storage"
+  ],
+  "version": "0.1.0"
+}

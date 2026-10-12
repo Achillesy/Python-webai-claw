@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px/1.6 system-ui, sans-serif; margin: 12px; width: 264px; color: #222; }
+  h1 { font-size: 14px; margin: 0 0 6px; }
+  .row { margin: 8px 0; }
+  button { cursor: pointer; }
+  .mut { color: #666; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>webai-claw <span id="ver" class="mut" style="font-weight:normal"></span></h1>
+  <div class="row">Local host: <span id="status">not tested</span></div>
+  <div class="row"><button id="ping">Test Bridge</button></div>
+  <div class="row">Machine ID: <span id="mid" class="mut">unknown</span> <button id="copymid">Copy UUID</button></div>
+  <label class="row" style="display:block">
+    <input type="checkbox" id="autosend"> Auto-send after result is filled back
+  </label>
+  <div class="mut">Default off: the result is only filled into the input box; you confirm before sending. When on, the command result is sent automatically as soon as it comes back.</div>
+  <div class="row mut">Useful? Buy the author a coffee: <a href="https://ko-fi.com/achillesy" target="_blank">Ko-fi</a> · <a href="https://paypal.me/achillesnewman" target="_blank">PayPal</a></div>
+  <script src="popup.js"></script>
+</body>
+</html>
