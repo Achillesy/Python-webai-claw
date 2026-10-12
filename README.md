@@ -25,7 +25,7 @@ your computer becomes its hands.
    (`~/.webai-claw/`, Chrome registration, operator guides).
 
 Protocol: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) (v3).
-Design notes: [`docs/DESIGN.md`](docs/DESIGN.md).
+Design notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Quick start
 

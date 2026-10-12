@@ -7,7 +7,7 @@ webai-claw is a hard fork by copy (fresh git history) of:
 - **Date:** 2026-10-12
 
 The v2 design work (URL-keyed command queues, install-time machine identity,
-execution-robustness lessons) was carried over into `DESIGN.md` and
+execution-robustness lessons) was carried over into `ARCHITECTURE.md`, `ROADMAP.md`, `DECISIONS.md` and
 `PROTOCOL.md`; the implementation starts from the renamed v2 code and applies
 the redesigns from the ground up instead of branching.
 

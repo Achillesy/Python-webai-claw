@@ -21,7 +21,7 @@ DeepSeek……）聊天；当 AI 需要在你的电脑上**动手**时，它写�
 3. **安装器**——`native-host/install.py` 按机器装好一切（`~/.webai-claw/`、
    Chrome 注册、操作指南）。
 
-协议见 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)（v3），设计见 [`docs/DESIGN.md`](docs/DESIGN.md)。
+协议见 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)（v3），设计见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ## 快速开始
 
