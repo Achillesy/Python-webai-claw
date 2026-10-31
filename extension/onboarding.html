@@ -54,12 +54,20 @@
   </div>
 
   <div class="card" id="success">
-    <h2>Step 2 — You're connected</h2>
-    <p>Your machine ID (every command must carry this so it reaches <em>your</em> computer):</p>
+    <h2>Step 2 — Connect in the AI chat</h2>
+    <p>Your machine ID (shown for reference; command blocks do not need it):</p>
     <p><span class="uuid" id="uuid"></span> <button class="small" id="copy-uuid">Copy UUID</button></p>
-    <p>Open <a href="https://muse.ai" target="_blank">muse.ai</a>, start a chat, and paste:</p>
+    <p>Open <a href="https://muse.ai" target="_blank">muse.ai</a> or
+       <a href="https://chat.deepseek.com" target="_blank">chat.deepseek.com</a>,
+       click the webai-claw toolbar icon, then click <strong>Connect</strong>.</p>
+    <p>The extension attaches <span class="uuid">AI-AGENT.md</span> and the local
+       config automatically. Then just ask in natural language, e.g.
+       “Show my home directory.” The AI will reply with a command block like:</p>
     <div class="example" id="example"></div>
-    <p class="hint">Every command block needs <span class="uuid">"v":3</span>, a unique <span class="uuid">"id"</span>, and your <span class="uuid">"host"</span> UUID.</p>
+    <p class="hint">Only exact <span class="uuid">"v":3</span> blocks execute.
+       Every command must carry the target <span class="uuid">host</span> UUID;
+       missing/mismatched host is ignored. <span class="uuid">session</span>/<span class="uuid">ai</span>
+       are stamped by Connect.</p>
   </div>
 </div>
 <script src="onboarding.js"></script>

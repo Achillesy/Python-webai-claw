@@ -20,7 +20,7 @@
       "run_at": "document_idle"
     }
   ],
-  "description": "Give web AI claws on your computer \u2014 turn Q&A into output.",
+  "description": "Give web AI claws on your computer — turn Q&A into output.",
   "host_permissions": [
     "https://muse.ai/*",
     "https://chat.deepseek.com/*"
@@ -37,5 +37,5 @@
     "nativeMessaging",
     "storage"
   ],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

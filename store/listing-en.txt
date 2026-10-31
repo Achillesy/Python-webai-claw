@@ -21,7 +21,7 @@ open-source local program (one install, ~5 minutes):
   1. Install this extension.
   2. Install the local host from the project page
      (github.com/Achillesy/Python-webai-claw).
-  3. Paste the short AI-GUIDE into your AI chat and start talking.
+  3. Open a supported AI chat and click Connect in the extension popup.
 
 PRIVACY & SECURITY
 - The local program opens no network ports and talks only to this extension.

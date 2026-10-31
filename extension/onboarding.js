@@ -35,7 +35,7 @@ function testConnection() {
         setStatus('ok', 'Connected — ' + (res.hostname || 'this computer'), '');
         document.getElementById('uuid').textContent = mid;
         document.getElementById('example').textContent =
-          '{"claw":"exec","v":3,"id":"ls-001","host":"' + mid + '","cmd":"ls ~"}';
+          '{"claw":"exec","id":"ls-001","host":"<UUID>","cmd":"ls ~","v":3}';
         successEl.style.display = 'block';
       } else {
         setStatus('bad', 'Helper not detected', 'Install it with the command above, then click Test Connection again. (' + ((res && res.error) || 'unknown error') + ')');

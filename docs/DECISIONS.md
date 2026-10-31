@@ -22,8 +22,10 @@ fence — the two products coexist without interference.
 `` `muse-exec `` would let both extensions grab the same blocks → double
 execution during the overlap period.
 
-**Decision.** v3: fence `` `claw-exec ``, header key `"claw"`, version gate
-`"v":3`. Specified in [`PROTOCOL.md`](PROTOCOL.md).
+**Decision.** v3: fence `` `claw ``, header key `"claw"`, exact version gate
+`"v":3`. The AI block must carry the target `host`; the extension stamps
+session/ai.
+Specified in [`PROTOCOL.md`](PROTOCOL.md).
 
 **Consequences.** Old and new extensions can be installed side by side; a
 block only ever triggers one product.

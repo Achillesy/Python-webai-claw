@@ -19,6 +19,7 @@ import base64
 import json
 import mimetypes
 import os
+import signal
 import socket
 import struct
 import subprocess
@@ -29,13 +30,27 @@ import uuid
 import ctx_summary
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+HOST_VERSION = "0.2.0"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
-DEFAULT_TIMEOUT = 120  # seconds; conservative for now
+RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
+LEASE_PATH = os.path.join(RUNTIME_DIR, "active.json")
+LEASE_LOCK = os.path.join(RUNTIME_DIR, "active.lock")
+HANDOFF_PATH = os.path.join(BASE_DIR, "handoff.md")
+LEASE_SCHEMA = 1
+HEARTBEAT_INTERVAL = 5.0  # seconds
+LEASE_STALE_SECONDS = 30.0  # host heartbeat age before another browser may take over
+LEASE_LOCK_STALE = 10  # seconds; a crashed holder's lock file is removable after this
+DEFAULT_TIMEOUT = 120  # seconds; default for ordinary commands
+AUTO_TIMEOUT_MAX = 1200  # seconds; AI may set up to 20 min without explicit user approval
+APPROVED_TIMEOUT_MAX = 7200  # seconds; hard ceiling after the user explicitly approves
 HOST_CWD = os.path.expanduser("~")  # fixed cwd: predictable, idempotent
-HISTORY_PATH = os.path.join(LOG_DIR, "exec_history.json")
+HISTORY_PATH = os.path.join(LOG_DIR, "exec_history.jsonl")
+OLD_HISTORY_PATH = os.path.join(LOG_DIR, "exec_history.json")
+HISTORY_LOCK = os.path.join(LOG_DIR, "exec_history.lock")
 HISTORY_LIMIT = 500  # keep execution records for the most recent 500 ids
-HISTORY_MAX_BYTES = 1 * 1024 * 1024  # total file size cap 1MB (second safety net beyond the count limit)
+HISTORY_MAX_BYTES = 1 * 1024 * 1024  # compact when the JSONL file grows past 1MB
+HISTORY_LOCK_STALE = 10  # seconds; a crashed holder's lock file is removable after this
 STDOUT_HEAD_LEN = 500  # keep only the first 500 chars of output per entry (ctx_summary uses the first 80)
 # Slimming note (2026-10-04): HISTORY is a key table for idempotent
 # dedup, not an audit archive. Storing full stdout once bloated it to
@@ -51,23 +66,21 @@ FILE_DENY = (
     "/.env", "credentials", "keychain", "cookies", "login data",
     "/etc/shadow", "/etc/sudoers", ".netrc", ".pgpass",
 )
-# Machine identity: hostnames can collide and be renamed, so they can't
-# identify a machine. machine_id is a uuid4, decoupled from human naming.
-# The host generates it on first run and persists it. Identity follows the
-# machine, not the browser profile (reinstalling the extension keeps it).
-# Deleting the file rotates the identity — old blocks addressed to the
-# previous id naturally stop matching, which is the expected behavior.
+# Machine identity: install-time only. install.py creates machine.json
+# once (first-writer-wins); host.py is read-only and fails fast if it is
+# missing. Runtime generation is intentionally gone: a swallowed write
+# error used to produce a fresh UUID per host process.
 MACHINE_ID_PATH = os.path.join(BASE_DIR, "machine.json")
-# Pre-~/.webai-claw location; kept as a read fallback so upgrading
-# doesn't rotate the identity. install.py migrates it on reinstall.
-LEGACY_MACHINE_ID_PATH = os.path.join(
-    os.path.expanduser("~"), ".config", "webai-claw", "machine.json")
+
+
+LOG_LOCK = threading.Lock()
 
 
 def log(line):
     try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + line + "\n")
+        with LOG_LOCK:
+            with open(LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + line + "\n")
     except OSError:
         pass
 
@@ -82,59 +95,481 @@ def slim_entry(key, v):
         "duration_ms": v.get("duration_ms", 0),
         "ts": v.get("ts", 0),
         "session": v.get("session", ""),
+        "ai": v.get("ai", ""),
         "cmd": str(v.get("cmd", ""))[:200],
         # tolerate the old full-stdout field; take the first 500 chars
         "stdout_head": str(v.get("stdout_head") or v.get("stdout") or "")[:STDOUT_HEAD_LEN],
     }
 
 
-def load_history():
+def _iter_history(path):
     try:
-        with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    # migration: old versions stored full stdout; slim on load
-    try:
-        return {k: slim_entry(k, v) for k, v in raw.items()}
-    except (AttributeError, TypeError):
-        return {}
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict) and obj.get("id"):
+                    yield obj
+    except OSError:
+        return
 
 
-def save_history(hist):
+def _trim_history(hist):
+    items = sorted(hist.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)
+    return dict(items[:HISTORY_LIMIT])
+
+
+def _acquire_lock(path, timeout=5.0, stale=HISTORY_LOCK_STALE):
+    """Best-effort cross-process lock. Returns an fd, or None on timeout."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii"))
+            except OSError:
+                pass
+            return fd
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(path) > stale:
+                    os.remove(path)
+                    continue
+            except OSError:
+                pass
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.05)
+        except OSError:
+            return None
+
+
+def _release_lock(fd, path):
     try:
-        items = sorted(hist.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)
-        items = items[:HISTORY_LIMIT]
-        blob = json.dumps(dict(items), ensure_ascii=False, indent=2)
-        # total size cap: rarely hit after slimming; drop oldest first when hit
-        while len(blob.encode("utf-8")) > HISTORY_MAX_BYTES and len(items) > 1:
-            items = items[:-1]
-            blob = json.dumps(dict(items), ensure_ascii=False, indent=2)
-        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
-            f.write(blob)
+        os.close(fd)
     except OSError:
         pass
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def load_history():
+    """Read the append-only JSONL history; last writer for an id wins."""
+    hist = {}
+    for obj in _iter_history(HISTORY_PATH):
+        key = str(obj.get("id"))
+        hist[key] = slim_entry(key, obj)
+    # One-time migration from the old whole-file JSON history.
+    if not hist and os.path.exists(OLD_HISTORY_PATH):
+        try:
+            with open(OLD_HISTORY_PATH, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                hist[str(k)] = slim_entry(str(k), v)
+        if hist:
+            try:
+                with open(HISTORY_PATH, "a", encoding="utf-8") as f:
+                    for v in hist.values():
+                        f.write(json.dumps(v, ensure_ascii=False,
+                                          separators=(",", ":")) + "\n")
+                os.replace(OLD_HISTORY_PATH, OLD_HISTORY_PATH + ".migrated")
+            except OSError:
+                pass
+    return _trim_history(hist)
+
+
+def refresh_history():
+    """Re-read from disk before dedup checks so two hosts see each other."""
+    global HISTORY
+    HISTORY = load_history()
+    return HISTORY
+
+
+def _compact_history_locked():
+    try:
+        if os.path.getsize(HISTORY_PATH) <= HISTORY_MAX_BYTES:
+            return
+    except OSError:
+        return
+    hist = {}
+    for obj in _iter_history(HISTORY_PATH):
+        key = str(obj.get("id"))
+        hist[key] = slim_entry(key, obj)
+    hist = _trim_history(hist)
+    tmp = HISTORY_PATH + ".tmp.%d" % os.getpid()
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            for v in sorted(hist.values(), key=lambda x: x.get("ts", 0)):
+                f.write(json.dumps(v, ensure_ascii=False,
+                                   separators=(",", ":")) + "\n")
+        os.replace(tmp, HISTORY_PATH)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def append_history(entry):
+    """Append one JSON line. The lock also protects occasional compaction."""
+    line = json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
+    lock_fd = _acquire_lock(HISTORY_LOCK, 5.0)
+    try:
+        with open(HISTORY_PATH, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        if lock_fd is not None:
+            _compact_history_locked()
+    except OSError:
+        pass
+    finally:
+        if lock_fd is not None:
+            _release_lock(lock_fd, HISTORY_LOCK)
+
+
+def _pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            code = ctypes.c_ulong()
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            kernel32.CloseHandle(handle)
+            return bool(ok) and code.value == STILL_ACTIVE
+        except Exception:
+            return True  # uncertain: do not declare a live task stale
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _terminate_tree(pid, pgid=None, grace=3.0):
+    """Terminate a command's process tree. Best-effort cross-platform."""
+    if not pid:
+        return
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=10)
+        except Exception:
+            pass
+        return
+    try:
+        target = int(pgid or pid)
+    except (TypeError, ValueError):
+        target = int(pid)
+    try:
+        os.killpg(target, signal.SIGTERM)
+    except OSError:
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except OSError:
+            return
+    deadline = time.time() + grace
+    while time.time() < deadline:
+        if not _pid_alive(pid):
+            return
+        time.sleep(0.1)
+    try:
+        os.killpg(target, signal.SIGKILL)
+    except OSError:
+        try:
+            os.kill(int(pid), signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _lease_read():
+    try:
+        with open(LEASE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _lease_write(lease):
+    os.makedirs(RUNTIME_DIR, exist_ok=True)
+    tmp = LEASE_PATH + ".tmp.%d" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(lease, f, ensure_ascii=False, indent=2)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except OSError:
+            pass
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    last_error = None
+    for _ in range(5):
+        try:
+            os.replace(tmp, LEASE_PATH)
+            return
+        except OSError as e:
+            last_error = e
+            time.sleep(0.02)
+    if last_error is not None:
+        raise last_error
+
+
+def _lease_is_stale(lease):
+    if not lease:
+        return True
+    if lease.get("browser_alive") is False:
+        return True
+    if not _pid_alive(lease.get("host_pid")):
+        return True
+    try:
+        age = time.time() - float(lease.get("last_heartbeat") or 0)
+    except (TypeError, ValueError):
+        return True
+    return age > LEASE_STALE_SECONDS
+
+
+def _lease_owner(lease):
+    return (lease or {}).get("owner") or {}
+
+
+def _lease_owner_binding(lease):
+    return _lease_owner(lease).get("binding_id")
+
+
+def _lease_cleanup_orphan(lease):
+    child_pid = (lease or {}).get("child_pid")
+    if child_pid and _pid_alive(child_pid):
+        log("lease: terminating orphan child pid=%s pgid=%s" % (
+            child_pid, (lease or {}).get("child_pgid")))
+        _terminate_tree(child_pid, (lease or {}).get("child_pgid"))
+
+
+def _lease_busy_result(lease, reason=None, stale=False):
+    owner = _lease_owner(lease)
+    state = (lease or {}).get("state", "connected")
+    if reason is None:
+        reason = "owner_running" if state == "running" else "owner_connected"
+    elapsed = 0
+    try:
+        if state == "running":
+            elapsed = int(time.time() - float((lease or {}).get("started_at") or 0))
+    except (TypeError, ValueError):
+        elapsed = 0
+    return {
+        "ok": False,
+        "reason": reason,
+        "owner": owner,
+        "state": state,
+        "elapsed_s": elapsed,
+        "stale": stale,
+    }
+
+
+def lease_acquire(binding_id, session, ai, page_url="", page_title="", browser="", extension_id=""):
+    if not (isinstance(binding_id, str) and binding_id and
+            isinstance(session, str) and session and
+            isinstance(ai, str) and ai):
+        return {"ok": False, "reason": "invalid",
+                "error": "binding_id/session/ai must be non-empty strings"}
+    fd = _acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
+    if fd is None:
+        return {"ok": False, "reason": "lock_timeout",
+                "error": "could not acquire the machine lease lock"}
+    try:
+        lease = _lease_read()
+        now = time.time()
+        if lease and not _lease_is_stale(lease):
+            owner = _lease_owner(lease)
+            if owner.get("binding_id") == binding_id:
+                owner.update({"session": session, "ai": ai,
+                              "page_url": page_url, "page_title": page_title,
+                              "browser": browser, "extension_id": extension_id})
+                lease.update({
+                    "owner": owner,
+                    "host_pid": os.getpid(),
+                    "browser_alive": True,
+                    "last_heartbeat": now,
+                    "last_binding_heartbeat": now,
+                })
+                _lease_write(lease)
+                return {"ok": True, "lease": lease, "refreshed": True}
+            return _lease_busy_result(lease)
+        stale = bool(lease)
+        if stale:
+            _lease_cleanup_orphan(lease)
+        new = {
+            "schema": LEASE_SCHEMA,
+            "owner": {
+                "binding_id": binding_id,
+                "session": session,
+                "ai": ai,
+                "page_url": page_url,
+                "page_title": page_title,
+                "extension_id": extension_id,
+                "browser": browser,
+            },
+            "state": "connected",
+            "host_pid": os.getpid(),
+            "browser_alive": True,
+            "child_pid": None,
+            "child_pgid": None,
+            "task_id": None,
+            "cmd": "",
+            "started_at": 0,
+            "last_heartbeat": now,
+            "last_progress": 0,
+            "last_binding_heartbeat": now,
+            "cancel_requested": False,
+        }
+        _lease_write(new)
+        return {"ok": True, "lease": new, "took_over_stale": stale}
+    finally:
+        _release_lock(fd, LEASE_LOCK)
+
+
+def lease_release(binding_id=None):
+    fd = _acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
+    if fd is None:
+        return False
+    try:
+        lease = _lease_read()
+        if not lease:
+            return True
+        if binding_id and _lease_owner_binding(lease) != binding_id:
+            return False
+        try:
+            os.remove(LEASE_PATH)
+        except OSError:
+            pass
+        return True
+    finally:
+        _release_lock(fd, LEASE_LOCK)
+
+
+def lease_update_owned(binding_id, **fields):
+    if not binding_id:
+        return None
+    fd = _acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
+    if fd is None:
+        return None
+    try:
+        lease = _lease_read()
+        if not lease or _lease_owner_binding(lease) != binding_id:
+            return None
+        lease.update(fields)
+        lease["host_pid"] = os.getpid()
+        if "browser_alive" not in fields:
+            lease["browser_alive"] = True
+        lease["last_heartbeat"] = time.time()
+        _lease_write(lease)
+        return lease
+    finally:
+        _release_lock(fd, LEASE_LOCK)
+
+
+def lease_touch(binding_id=None):
+    binding_id = binding_id or LEASE_BINDING
+    if not binding_id:
+        return None
+    return lease_update_owned(binding_id, last_heartbeat=time.time(),
+                              browser_alive=BROWSER_ALIVE)
+
+
+def lease_request_cancel(binding_id=None, foreign=False):
+    fd = _acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
+    if fd is None:
+        return False
+    try:
+        lease = _lease_read()
+        if not lease:
+            return False
+        if not foreign and binding_id and _lease_owner_binding(lease) != binding_id:
+            return False
+        lease["cancel_requested"] = True
+        _lease_write(lease)
+        return True
+    finally:
+        _release_lock(fd, LEASE_LOCK)
+
+
+def lease_cancel_requested(binding_id=None):
+    lease = _lease_read()
+    if not lease:
+        return False
+    if binding_id and _lease_owner_binding(lease) != binding_id:
+        return False
+    return bool(lease.get("cancel_requested"))
+
+
+def lease_status():
+    lease = _lease_read()
+    if not lease:
+        return {"state": "idle", "stale": True, "owner": None}
+    elapsed = 0
+    try:
+        if lease.get("state") == "running":
+            elapsed = int(time.time() - float(lease.get("started_at") or 0))
+    except (TypeError, ValueError):
+        elapsed = 0
+    return {
+        "state": lease.get("state", "connected"),
+        "owner": _lease_owner(lease),
+        "stale": _lease_is_stale(lease),
+        "host_pid": lease.get("host_pid"),
+        "task_id": lease.get("task_id"),
+        "cmd": lease.get("cmd", ""),
+        "started_at": lease.get("started_at", 0),
+        "elapsed_s": elapsed,
+        "cancel_requested": bool(lease.get("cancel_requested")),
+    }
 
 
 def get_machine_id():
-    # Machine identity: generated once as uuid4, persisted to a local file.
-    # Identity follows the machine, not the browser profile.
-    for path in (MACHINE_ID_PATH, LEGACY_MACHINE_ID_PATH):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                mid = json.load(f).get("machine_id")
-            if mid:
-                return mid
-        except (OSError, ValueError, AttributeError):
-            pass
-    mid = str(uuid.uuid4())
+    """Read install-time identity. Never generate at runtime."""
     try:
-        with open(MACHINE_ID_PATH, "w", encoding="utf-8") as f:
-            json.dump({"machine_id": mid}, f)
-        os.chmod(MACHINE_ID_PATH, 0o600)
-    except OSError:
-        pass
-    return mid
+        with open(MACHINE_ID_PATH, "r", encoding="utf-8") as f:
+            mid = json.load(f).get("machine_id")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not mid:
+        return None
+    try:
+        uuid.UUID(str(mid))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return str(mid)
 
 
 def read_message():
@@ -148,9 +583,10 @@ def read_message():
 
 def send_message(obj):
     data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-    sys.stdout.buffer.write(struct.pack("<I", len(data)))
-    sys.stdout.buffer.write(data)
-    sys.stdout.buffer.flush()
+    with SEND_LOCK:
+        sys.stdout.buffer.write(struct.pack("<I", len(data)))
+        sys.stdout.buffer.write(data)
+        sys.stdout.buffer.flush()
 
 
 def decode_output(raw):
@@ -172,8 +608,16 @@ def shell_argv(cmd):
     return ["/bin/bash", "-lc", cmd]
 
 
-def run_exec(msg):
+def shell_name():
+    return "powershell" if sys.platform == "win32" else "zsh"
+
+
+def run_exec(msg, cancel_event=None):
     rid = msg.get("id")
+    binding_id = msg.get("binding_id") or ""
+    # Two host processes (Chrome/Edge) share the home dir: re-read before
+    # dedup so a just-finished command in the other browser is visible.
+    refresh_history()
     if rid in HISTORY:
         log("duplicate id=%s, returning cached" % rid)
         h = HISTORY[rid]
@@ -183,6 +627,8 @@ def run_exec(msg):
             "id": rid,
             "hostname": socket.gethostname(),
             "machine_id": MACHINE_ID,
+            "session": h.get("session", ""),
+            "ai": h.get("ai", ""),
             "ok": h.get("ok"),
             "exit_code": h.get("exit_code"),
             "stdout": (h.get("stdout_head") or "") + "\n…(dedup hit: this id was already executed; only the output summary is kept)",
@@ -208,13 +654,45 @@ def run_exec(msg):
         timeout = int(msg.get("timeout") or DEFAULT_TIMEOUT)
     except (TypeError, ValueError):
         timeout = DEFAULT_TIMEOUT
+    approved = (msg.get("approved") is True)
+    if timeout < 1:
+        timeout = 1
+    hard_limit = APPROVED_TIMEOUT_MAX if approved else AUTO_TIMEOUT_MAX
+    if timeout > hard_limit:
+        if approved:
+            return {
+                "type": "error",
+                "id": rid,
+                "error": "timeout %ss exceeds the hard limit %ss; split the command or run it manually" % (timeout, hard_limit),
+            }
+        return {
+            "type": "error",
+            "id": rid,
+            "error": "timeout %ss requires explicit user approval (max %ss without approval); ask the user, then resend with approved=true" % (timeout, hard_limit),
+        }
     rid = msg.get("id")
     started = time.time()
+    lease_update_owned(binding_id, state="running", task_id=rid,
+                       cmd=cmd[:200], started_at=started,
+                       last_progress=started, cancel_requested=False)
     error = None
+    popen_kwargs = {}
+    if sys.platform != "win32":
+        popen_kwargs["start_new_session"] = True
+    else:
+        popen_kwargs["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     proc = subprocess.Popen(
         shell_argv(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    cwd=HOST_CWD,
+        cwd=HOST_CWD, **popen_kwargs
     )
+    pgid = None
+    if sys.platform != "win32":
+        try:
+            pgid = os.getpgid(proc.pid)
+        except OSError:
+            pgid = None
+    lease_update_owned(binding_id, child_pid=proc.pid, child_pgid=pgid)
     box = {}
 
     def wait():
@@ -225,23 +703,48 @@ def run_exec(msg):
 
     t = threading.Thread(target=wait, daemon=True)
     t.start()
+    last_progress_at = started
     while t.is_alive():
-        remaining = timeout - (time.time() - started)
+        now = time.time()
+        if cancel_event is not None and cancel_event.is_set():
+            _terminate_tree(proc.pid, pgid)
+            t.join(5)
+            error = "killed by user"
+            break
+        if binding_id and lease_cancel_requested(binding_id):
+            _terminate_tree(proc.pid, pgid)
+            t.join(5)
+            error = "killed by user (interrupt requested)"
+            break
+        remaining = timeout - (now - started)
         if remaining <= 0:
-            proc.kill()
+            _terminate_tree(proc.pid, pgid)
             t.join(5)
             error = "timeout after %ss" % timeout
             break
-        t.join(min(20, remaining))
-        if t.is_alive():
+        t.join(min(1.0, remaining))
+        if t.is_alive() and time.time() - last_progress_at >= 20:
+            last_progress_at = time.time()
+            lease_update_owned(binding_id, last_progress=last_progress_at)
             # heartbeat roughly every 20s so the upper long-lived connection isn't killed as idle
-            send_message(
-                {
-                    "type": "progress",
-                    "id": rid,
-                    "elapsed_ms": int((time.time() - started) * 1000),
-                }
-            )
+            try:
+                send_message(
+                    {
+                        "type": "progress",
+                        "id": rid,
+                        "elapsed_ms": int((time.time() - started) * 1000),
+                    }
+                )
+            except Exception as e:
+                log("progress send failed id=%s: %r" % (rid, e))
+    if t.is_alive():
+        # Last-resort pipe close: an orphan may hold stdout/stderr open.
+        for pipe in (proc.stdout, proc.stderr):
+            try:
+                pipe.close()
+            except Exception:
+                pass
+        t.join(2)
     exit_code = proc.returncode if proc.returncode is not None else -1
     stdout = decode_output(box.get("out"))
     stderr = decode_output(box.get("err"))
@@ -253,6 +756,8 @@ def run_exec(msg):
         "id": msg.get("id"),
         "hostname": socket.gethostname(),
         "machine_id": MACHINE_ID,
+        "session": msg.get("session") or "",
+        "ai": msg.get("ai") or "",
         "ok": exit_code == 0 and error is None,
         "exit_code": exit_code,
         "stdout": stdout,
@@ -261,8 +766,11 @@ def run_exec(msg):
     }
     if error:
         res["error"] = error
+        res["killed"] = error.startswith("killed")
+    res["timeout"] = timeout
+    res["approved"] = approved
     res["ts"] = int(time.time())
-    # slimmed store: metadata + output summary + session only (no UUID; the machine is implied)
+    # slimmed store: metadata + output summary + session/ai only
     HISTORY[rid] = {
         "id": rid,
         "ok": res["ok"],
@@ -270,16 +778,24 @@ def run_exec(msg):
         "duration_ms": duration_ms,
         "ts": res["ts"],
         "session": msg.get("session") or "",
+        "ai": msg.get("ai") or "",
         "cmd": cmd[:200],
         "stdout_head": stdout[:STDOUT_HEAD_LEN],
     }
-    save_history(HISTORY)
+    append_history(HISTORY[rid])
+    lease_update_owned(binding_id, state="connected", child_pid=None,
+                       child_pgid=None, task_id=None, cmd="", started_at=0,
+                       last_progress=time.time(), cancel_requested=False)
     return res
 
 
 def run_read_file(msg):
     """Read a local file, return it base64-encoded in chunks. Deny-list + size cap."""
     rid = msg.get("id")
+    if not _binding_ok(msg):
+        return {"type": "error", "id": rid, "error": "not the bound page"}
+    if not _target_ok(msg):
+        return {"type": "error", "id": rid, "error": "missing or mismatched host"}
     path = msg.get("path", "")
     if not path:
         return {"type": "error", "id": rid, "error": "missing path"}
@@ -327,8 +843,110 @@ def run_read_file(msg):
     return out
 
 
-def run_diag(msg):
+def _binding_ok(msg):
+    lease = _lease_read()
+    if not lease:
+        # Legacy callers do not send binding_id and may still use read_file /
+        # diag. A new-style request must have an active lease.
+        return not bool(msg.get("binding_id"))
+    if _lease_is_stale(lease):
+        return False
+    owner = _lease_owner(lease)
+    if (msg.get("binding_id") or "") != owner.get("binding_id"):
+        return False
+    if msg.get("session") and msg.get("session") != owner.get("session"):
+        return False
+    if msg.get("ai") and msg.get("ai") != owner.get("ai"):
+        return False
+    return True
+
+
+def _target_ok(msg):
+    host = msg.get("host")
+    if not isinstance(host, str) or not host:
+        return False
+    return host.strip().lower() == (MACHINE_ID or "").lower()
+
+
+def _read_text_file(path, limit=512 * 1024):
     try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read(limit)
+    except OSError:
+        return ""
+
+
+def run_bundle(msg):
+    rid = msg.get("id")
+    if not _binding_ok(msg):
+        return {"type": "error", "id": rid, "error": "not the bound page"}
+    guide = ""
+    for path in (os.path.join(BASE_DIR, "AI-AGENT.md"),
+                 os.path.join(os.path.dirname(BASE_DIR), "AI-AGENT.md")):
+        guide = _read_text_file(path)
+        if guide:
+            break
+    handoff = _read_text_file(HANDOFF_PATH)
+    return {
+        "type": "bundle", "id": rid,
+        "machine_id": MACHINE_ID,
+        "hostname": socket.gethostname(),
+        "platform": sys.platform,
+        "shell": shell_name(),
+        "host_version": HOST_VERSION,
+        "guide": guide,
+        "handoff": handoff,
+    }
+
+
+def run_summary(msg):
+    rid = msg.get("id")
+    if not _binding_ok(msg):
+        return {"type": "error", "id": rid, "error": "not the bound page"}
+    if not _target_ok(msg):
+        return {"type": "error", "id": rid, "error": "missing or mismatched host"}
+    text = msg.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return {"type": "error", "id": rid, "error": "summary text is empty"}
+    if len(text.encode("utf-8", "ignore")) > MAX_CMD_BYTES:
+        return {"type": "error", "id": rid, "error": "summary too large"}
+    try:
+        os.makedirs(BASE_DIR, exist_ok=True)
+        tmp = HANDOFF_PATH + ".tmp.%d" % os.getpid()
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp, HANDOFF_PATH)
+    except OSError as e:
+        return {"type": "error", "id": rid,
+                "error": "failed to write handoff: %r" % (e,)}
+    log("summary id=%s bytes=%d -> %s" % (
+        rid, len(text.encode("utf-8", "ignore")), HANDOFF_PATH))
+    return {
+        "type": "result", "id": rid, "hostname": socket.gethostname(),
+        "platform": sys.platform, "machine_id": MACHINE_ID,
+        "session": msg.get("session") or "", "ai": msg.get("ai") or "",
+        "ok": True, "exit_code": 0,
+        "stdout": "summary written to %s" % HANDOFF_PATH,
+        "stderr": "", "duration_ms": 0, "ts": int(time.time()),
+    }
+
+
+def run_diag(msg):
+    if not _binding_ok(msg):
+        return {"type": "error", "id": msg.get("id"), "error": "not the bound page"}
+    if not _target_ok(msg):
+        return {"type": "error", "id": msg.get("id"), "error": "missing or mismatched host"}
+    try:
+        refresh_history()
         tail = []
         if os.path.exists(LOG_PATH):
             with open(LOG_PATH, encoding="utf-8", errors="replace") as f:
@@ -342,6 +960,10 @@ def run_diag(msg):
             "hostname": socket.gethostname(),
             "platform": sys.platform,
             "machine_id": MACHINE_ID,
+            "session": msg.get("session") or "",
+            "ai": msg.get("ai") or "",
+            "host_version": HOST_VERSION,
+            "lease": lease_status(),
             "pid": os.getpid(),
             "history_size": len(HISTORY),
             "history_limit": HISTORY_LIMIT,
@@ -355,6 +977,160 @@ def run_diag(msg):
         return {"type": "error", "id": msg.get("id"), "error": "diag failed: %r" % (e,)}
 
 
+def start_exec(msg):
+    global ACTIVE
+    rid = msg.get("id")
+    if (not isinstance(rid, str) or not rid or
+            not isinstance(msg.get("cmd"), str) or not msg.get("cmd")):
+        return {"type": "error", "id": rid,
+                "error": "id and cmd must be non-empty strings"}
+    if not _target_ok(msg):
+        return {"type": "error", "id": rid,
+                "error": "missing or mismatched host; command not executed"}
+    lease = _lease_read()
+    if not lease and msg.get("binding_id"):
+        return {"type": "error", "id": rid,
+                "error": "no active machine lease; reconnect the extension"}
+    if lease:
+        if _lease_is_stale(lease):
+            return {"type": "error", "id": rid,
+                    "error": "machine lease is stale; reconnect the extension"}
+        owner = _lease_owner(lease)
+        if not msg.get("binding_id") or msg.get("binding_id") != owner.get("binding_id"):
+            return {"type": "error", "id": rid,
+                    "error": "not the bound page for this machine"}
+        if msg.get("session") and msg.get("session") != owner.get("session"):
+            return {"type": "error", "id": rid,
+                    "error": "session mismatch with the bound page"}
+        if msg.get("ai") and msg.get("ai") != owner.get("ai"):
+            return {"type": "error", "id": rid,
+                    "error": "ai mismatch with the bound page"}
+        if lease.get("state") == "running":
+            return {"type": "error", "id": rid,
+                    "error": "host busy: %s" % (lease.get("task_id") or "?")}
+    with STATE_LOCK:
+        if ACTIVE is not None:
+            return {"type": "error", "id": rid,
+                    "error": "host busy: %s" % (ACTIVE.get("id") or "?")}
+        cancel = threading.Event()
+        ACTIVE = {"id": rid, "cancel": cancel, "started": time.time()}
+    threading.Thread(target=exec_worker, args=(msg, cancel), daemon=True).start()
+    return None
+
+
+def exec_worker(msg, cancel):
+    global ACTIVE
+    try:
+        res = run_exec(msg, cancel_event=cancel)
+    except Exception as e:
+        log("exec worker error: %r" % (e,))
+        res = {"type": "error", "id": msg.get("id"), "error": str(e)}
+    finally:
+        binding = msg.get("binding_id") or ""
+        lease_update_owned(binding, state="connected", child_pid=None,
+                           child_pgid=None, task_id=None, cmd="", started_at=0,
+                           last_progress=time.time(), cancel_requested=False)
+        with STATE_LOCK:
+            ACTIVE = None
+    try:
+        send_message(res)
+    except Exception:
+        pass
+
+
+def handle_connect(msg):
+    global LEASE_BINDING
+    binding = msg.get("binding_id") or ""
+    result = lease_acquire(binding, msg.get("session") or "",
+                           msg.get("ai") or "", msg.get("page_url") or "",
+                           msg.get("page_title") or "",
+                           msg.get("browser") or "",
+                           msg.get("extension_id") or "")
+    if result.get("ok"):
+        LEASE_BINDING = binding
+        return {
+            "type": "connected",
+            "id": msg.get("id"),
+            "binding_id": binding,
+            "machine_id": MACHINE_ID,
+            "hostname": socket.gethostname(),
+            "platform": sys.platform,
+            "shell": shell_name(),
+            "host_version": HOST_VERSION,
+            "session": msg.get("session") or "",
+            "ai": msg.get("ai") or "",
+            "took_over_stale": bool(result.get("took_over_stale")),
+        }
+    return {"type": "busy", "id": msg.get("id"), **result}
+
+
+def handle_disconnect(msg):
+    global LEASE_BINDING
+    binding = msg.get("binding_id") or LEASE_BINDING or ""
+    if not binding:
+        return {"type": "error", "id": msg.get("id"), "error": "missing binding_id"}
+    with STATE_LOCK:
+        active = ACTIVE
+    if active:
+        active["cancel"].set()
+    ok = lease_release(binding)
+    # Stop the heartbeat even if the lock was momentarily unavailable; a stale
+    # lease is safer than a released page continuing to refresh it. But do not
+    # let a wrong binding silence the real owner's heartbeat.
+    if ok or binding == LEASE_BINDING:
+        LEASE_BINDING = None
+    return {"type": "result", "id": msg.get("id"), "ok": ok,
+            "exit_code": 0 if ok else 1,
+            "stdout": "disconnected" if ok else "not the lease owner",
+            "stderr": "", "duration_ms": 0, "ts": int(time.time())}
+
+
+def handle_status(msg):
+    return {
+        "type": "state",
+        "id": msg.get("id"),
+        "machine_id": MACHINE_ID,
+        "hostname": socket.gethostname(),
+        "platform": sys.platform,
+        "shell": shell_name(),
+        "host_version": HOST_VERSION,
+        "lease": lease_status(),
+    }
+
+
+def handle_kill(msg):
+    rid = msg.get("id")
+    with STATE_LOCK:
+        active = ACTIVE
+    if not active:
+        return {"type": "error", "id": rid, "error": "no running task"}
+    if rid and rid != active.get("id"):
+        return {"type": "error", "id": rid,
+                "error": "running task is %s" % active.get("id")}
+    active["cancel"].set()
+    try:
+        lease_request_cancel(msg.get("binding_id") or LEASE_BINDING)
+    except Exception:
+        pass
+    return {"type": "progress", "id": active.get("id"),
+            "elapsed_ms": int((time.time() - active.get("started", time.time())) * 1000),
+            "killing": True}
+
+
+def handle_cancel(msg):
+    binding = msg.get("binding_id") or ""
+    with STATE_LOCK:
+        active = ACTIVE
+    if active and (not binding or binding == LEASE_BINDING):
+        active["cancel"].set()
+        return {"type": "progress", "id": active.get("id"), "killing": True}
+    ok = bool(binding) and lease_request_cancel(binding, foreign=True)
+    return {"type": "result", "id": msg.get("id"), "ok": ok,
+            "exit_code": 0 if ok else 1,
+            "stdout": "cancel requested" if ok else "no matching task/lease",
+            "stderr": "", "duration_ms": 0, "ts": int(time.time())}
+
+
 def handle(msg):
     t = msg.get("type")
     if t == "ping":
@@ -364,9 +1140,26 @@ def handle(msg):
             "hostname": socket.gethostname(),
             "platform": sys.platform,
             "machine_id": MACHINE_ID,
+            "host_version": HOST_VERSION,
+            "shell": shell_name(),
+            "lease": lease_status(),
         }
+    if t == "connect":
+        return handle_connect(msg)
+    if t == "disconnect":
+        return handle_disconnect(msg)
+    if t == "status":
+        return handle_status(msg)
     if t == "exec":
-        return run_exec(msg)
+        return start_exec(msg)
+    if t == "kill":
+        return handle_kill(msg)
+    if t == "cancel":
+        return handle_cancel(msg)
+    if t == "bundle":
+        return run_bundle(msg)
+    if t == "summary":
+        return run_summary(msg)
     if t == "diag":
         return run_diag(msg)
     if t == "read_file":
@@ -374,26 +1167,73 @@ def handle(msg):
     return {"type": "error", "id": msg.get("id"), "error": "unknown type: %r" % (t,)}
 
 
+SEND_LOCK = threading.Lock()
+STATE_LOCK = threading.Lock()
+ACTIVE = None
+BROWSER_ALIVE = True
+SHUTDOWN_EVENT = threading.Event()
+LEASE_BINDING = None
 HISTORY = {}
 MACHINE_ID = None
 
 
+def _on_signal(signum, frame):
+    global BROWSER_ALIVE
+    BROWSER_ALIVE = False
+    SHUTDOWN_EVENT.set()
+    with STATE_LOCK:
+        active = ACTIVE
+    if active:
+        active["cancel"].set()
+    try:
+        sys.stdin.close()
+    except Exception:
+        pass
+
+
+def heartbeat_loop():
+    while not SHUTDOWN_EVENT.wait(HEARTBEAT_INTERVAL):
+        try:
+            if BROWSER_ALIVE:
+                lease_touch()
+        except Exception:
+            pass
+
+
 def main():
-    global HISTORY, MACHINE_ID
+    global HISTORY, MACHINE_ID, BROWSER_ALIVE
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
+        os.makedirs(RUNTIME_DIR, exist_ok=True)
     except OSError:
         pass
-    HISTORY = load_history()
     MACHINE_ID = get_machine_id()
-    log("host started platform=%s hostname=%s machine_id=%s history=%d" % (
-        sys.platform, socket.gethostname(), MACHINE_ID, len(HISTORY)))
+    if not MACHINE_ID:
+        log("fatal: machine identity missing/invalid at %s; run install.py" % MACHINE_ID_PATH)
+        sys.stderr.write("webai-claw: machine identity missing; run native-host/install.py\n")
+        return 3
+    HISTORY = load_history()
+    BROWSER_ALIVE = True
+    for sig in (signal.SIGTERM, signal.SIGINT, getattr(signal, "SIGHUP", None)):
+        if sig is not None:
+            try:
+                signal.signal(sig, _on_signal)
+            except (OSError, ValueError):
+                pass
+    threading.Thread(target=heartbeat_loop, daemon=True).start()
+    log("host started platform=%s hostname=%s machine_id=%s history=%d version=%s" % (
+        sys.platform, socket.gethostname(), MACHINE_ID, len(HISTORY), HOST_VERSION))
     while True:
-        msg = read_message()
+        try:
+            msg = read_message()
+        except Exception:
+            break
         if msg is None:
             break
         try:
             res = handle(msg)
+            if res is None:
+                continue
             if isinstance(res, list):
                 for item in res:
                     send_message(item)
@@ -405,8 +1245,30 @@ def main():
                 send_message({"type": "error", "id": msg.get("id"), "error": str(e)})
             except Exception:
                 break
+    BROWSER_ALIVE = False
+    SHUTDOWN_EVENT.set()
+    with STATE_LOCK:
+        active = ACTIVE
+    if active:
+        active["cancel"].set()
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        with STATE_LOCK:
+            if ACTIVE is None:
+                break
+        time.sleep(0.1)
+    if LEASE_BINDING:
+        try:
+            lease_update_owned(LEASE_BINDING, browser_alive=False)
+        except Exception:
+            pass
+        try:
+            lease_release(LEASE_BINDING)
+        except Exception:
+            pass
     log("host exit")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

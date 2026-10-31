@@ -8,7 +8,8 @@
   var reg = (window.__webaiClawAdapters = window.__webaiClawAdapters || {});
 
   reg['muse.ai'] = {
-    name: 'claw',
+    name: 'muse',
+    ai: 'muse',
 
     // NOTE: isStopButton not implemented (aborts the whole chain when the user
     // hits stop/interrupt, see content.js). Reason: no verified DOM signature
@@ -16,9 +17,10 @@
     // blindly and risk false positives. Implement after real-site verification.
     // (content.js silently skips when this method is absent; other features unaffected.)
 
+    // Only block-level code. Do NOT scan inline <code>.
     findBlocks: function () {
       var els = Array.prototype.slice.call(
-        document.querySelectorAll('pre code, code, [class*="code"]')
+        document.querySelectorAll('pre code, pre')
       );
       // keep only innermost elements; avoid double-counting via outer containers
       return els.filter(function (el) {
@@ -26,6 +28,14 @@
           return other !== el && el.contains(other);
         });
       });
+    },
+
+    // Main chat has no thread id (https://muse.ai); side chats are
+    // https://muse.ai/thread/<uuid>.
+    sessionKey: function () {
+      var p = location.pathname.replace(/\/+$/, '');
+      if (/^\/thread\//.test(p)) return location.origin + p;
+      return location.origin;
     },
 
 

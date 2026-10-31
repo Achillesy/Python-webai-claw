@@ -14,7 +14,7 @@
 （装一次，约 5 分钟）：
   1. 安装本扩展。
   2. 按项目页说明装本机 host（github.com/Achillesy/Python-webai-claw）。
-  3. 把简短的 AI-GUIDE 粘进 AI 对话，开始说话。
+  3. 打开支持的 AI 对话，在扩展 popup 里点“连接”。
 
 隐私与安全
 - 本机程序不监听任何网络端口，只跟本扩展说话。

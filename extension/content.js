@@ -67,7 +67,7 @@ var stableTimers = {};
 var ready = false;
 var pagePort = null;
 var localHostname = null;
-var localMachineId = null;  // M4 strict addressing: local UUID (generated and persisted by host)
+var localMachineId = null;  // local UUID (install-time identity, shown in Connect)
 var localPlatform = null;
 var incompleteAt = {};
 var pendingResults = [];
@@ -79,6 +79,10 @@ var baselineIds = {};
 var ctxChars = 0;
 var ctxWarned = false;
 var PLACEHOLDER_IDS = { "唯一id": 1, "任意唯一id": 1, "your-id": 1, "example": 1, "示例": 1, "xxx": 1 };
+function isPlaceholderId(id) {
+  var s = String(id || '');
+  return !!PLACEHOLDER_IDS[id] || /^(example|sample)[-_]/i.test(s);
+}
 
 var WARMUP_MIN_MS = 2000;
 var WARMUP_QUIET_MS = 3000;
@@ -88,6 +92,94 @@ var warmupDone = false;
 var warmupQuietTimer = null;
 var userAborted = false;
 var selfActing = false;
+
+// ---------- machine binding / session ----------
+// BINDING_ID identifies this page instance, not its URL. The native host
+// stores it in the machine lease; other tabs/browsers (even with the same
+// URL) cannot take over while this page owns the lease.
+var BINDING_ID = (function () {
+  try { return 'p-' + crypto.randomUUID(); }
+  catch (e) { return 'p-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+})();
+var bound = false;
+var boundSession = null;
+var boundAi = null;
+var paused = false;
+var autoSentCount = 0;
+var PAUSE_AFTER = 10;
+
+function normalizeSession(v) {
+  try {
+    var u = new URL(v, location.href);
+    return u.origin + u.pathname.replace(/\/+$/, '');
+  } catch (e) {
+    return String(v || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  }
+}
+
+function sessionKeyOf() {
+  try {
+    if (adapter && typeof adapter.sessionKey === 'function') {
+      return normalizeSession(adapter.sessionKey());
+    }
+  } catch (e) {}
+  return normalizeSession(location.origin + location.pathname);
+}
+
+function aiType() {
+  return (adapter && (adapter.ai || adapter.name)) || 'unknown';
+}
+
+function sameOrigin(a, b) {
+  try { return new URL(a).origin === new URL(b).origin; }
+  catch (e) { return false; }
+}
+
+function isProvisionalSession(s) {
+  try {
+    var u = new URL(s);
+    if (u.hostname === 'muse.ai') {
+      var p = u.pathname.replace(/\/+$/, '');
+      return p === '' || p === '/thread/new' || p === '/new';
+    }
+  } catch (e) {}
+  return false;
+}
+
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function targetGate(block) {
+  if (!localMachineId) return 'defer';
+  var got = String(block.host || '').trim().toLowerCase();
+  if (!UUID_RE.test(got)) return 'missing';  // missing, hostname, *, or placeholder
+  if (got !== String(localMachineId).trim().toLowerCase()) return 'ignore';
+  return 'pass';
+}
+
+var missingHostWarned = {};
+function warnMissingHost(block) {
+  if (missingHostWarned[block.id]) return;
+  missingHostWarned[block.id] = true;
+  var msg = '[claw:error] id=' + block.id +
+    ' error=missing/invalid host; every command must include "host":"<UUID>" and "v":3. ' +
+    'This machine: ' + (localHostname || '?') + ' (' + (localPlatform || '?') +
+    '), host=' + (localMachineId || '?');
+  try {
+    if (adapter.fillResult(msg)) setTimeout(trySend, 300);
+  } catch (e) {}
+}
+
+function notifyHello() {
+  try {
+    getPort().postMessage({
+      type: 'hello',
+      binding_id: BINDING_ID,
+      session: sessionKeyOf(),
+      ai: aiType(),
+      url: location.href,
+      title: document.title
+    });
+  } catch (e) {}
+}
 
 // ---------- session & generation (Layer 1 scheduling / graceful stop) ----------
 // SESSION: logical session id for one page load; gen: generation, +1 on stop, old generations all expire.
@@ -136,6 +228,14 @@ function abortChain(reason) {
   // are all swallowed: they won't resurrect when the chain re-arms; only truly new blocks execute.
   Object.keys(firstSeenAt).forEach(function (id) { markProcessed(id); });
   firstSeenAt = {};
+  // Also swallow v3 blocks that appeared while the extension was paused but
+  // were never scanned; otherwise Stop would let them execute afterwards.
+  try {
+    adapter.findBlocks().forEach(function (el) {
+      var b = parseBlock(blockTextOf(el));
+      if (b) markProcessed(b.id);
+    });
+  } catch (e) {}
   Object.keys(incompleteAt).forEach(function (id) { delete incompleteAt[id]; });
   Object.keys(incompleteWarned).forEach(function (id) { delete incompleteWarned[id]; });
   pendingResults = [];
@@ -143,8 +243,18 @@ function abortChain(reason) {
   flushHardDeadline = 0;
   // generation +1: old-generation commands/results all expire; tell background to drop this session's queued items
   gen++;
-  nagTotalThisGen = 0;  // new generation resets the nag circuit-breaker counter
-  try { getPort().postMessage({ type: 'stop', session: SESSION, gen: gen }); } catch (e) {}
+  paused = false;
+  autoSentCount = 0;
+  setPauseStorage(false);
+  try {
+    getPort().postMessage({
+      type: 'stop',
+      session: sessionKeyOf(),
+      ai: aiType(),
+      binding_id: BINDING_ID,
+      gen: gen
+    });
+  } catch (e) {}
   // only relay a notice if something was actually voided: a plain-text stop (nothing running) doesn't disturb
   if (nTimers + nFlight > 0) sendCancelNotice(gen, nTimers, nFlight);
 }
@@ -175,21 +285,23 @@ function fillOnly(text) {
 
 // ---------- sentinel parsing ----------
 function parseBlock(text) {
+  text = String(text || '').replace(/^\s+/, '');
   var nl = text.indexOf('\n');
   var first = nl === -1 ? text : text.slice(0, nl);
   var head;
   try { head = JSON.parse(first); } catch (e) { return null; }
-  if (!head || !head.id) return null;
-  if (head.claw !== 'exec' && head.claw !== 'probe' && head.claw !== 'attach') return null;
-  if (!(typeof head.v === 'number' && head.v >= 3)) return null;
+  if (!head || (typeof head.id !== 'string' && typeof head.id !== 'number') || !head.id) return null;
+  if (['exec', 'probe', 'attach', 'diag', 'summary'].indexOf(head.claw) === -1) return null;
+  if (head.v !== 3) return null;
   var cmdFromHead = (typeof head.cmd === 'string') ? head.cmd : null;
   var cmdFromBody = (nl === -1 ? '' : text.slice(nl + 1)).trim();
   return {
     kind: head.claw,
     id: String(head.id),
-    host: head.host || null,
+    host: (typeof head.host === 'string') ? head.host : null,
     shell: head.shell || null,
     timeout: head.timeout || null,
+    approved: head.approved === true,
     sel: (typeof head.sel === 'string') ? head.sel : null,
     path: (typeof head.path === 'string') ? head.path : null,
     text: (typeof head.text === 'string') ? head.text : null,
@@ -220,8 +332,8 @@ function loadProcessed(done) {
       }
       if (res && res[PLATFORM_KEY]) localPlatform = res[PLATFORM_KEY];
       if (!localMachineId) {
-        // M4 strict-addressing precondition: connecting triggers a background ping to host; read with delayed retries.
-        // getPort() goes through background onConnect → ensureNativePort → ping → pong → cache.
+        // Cache the local UUID for the Connect attachment/display. getPort()
+        // goes through background onConnect -> ensureNativePort -> ping -> pong.
         try { getPort(); } catch (e) {}
         retryMachineIdentity(0);
       }
@@ -234,13 +346,13 @@ function loadProcessed(done) {
   }
 }
 
-// Retry a few times (2s / 5s / 10s) if machine_id is unavailable.
-// Strict addressing requires machine_id ready before executing blocks; if unavailable,
-// blocks are deferred (not marked processed) — no fail-open like the hostname era.
+// Retry a few times (2s / 5s / 10s) if machine_id is unavailable. It is not
+// required to execute blocks (the extension stamps the binding), but it is
+// needed for the Connect attachment and the UI.
 function retryMachineIdentity(n) {
   var waits = [2000, 5000, 10000];
   if (n >= waits.length) {
-    console.log('[webai-claw] local machine_id unavailable: host may not be installed or started; blocks will be deferred under strict addressing');
+    console.log('[webai-claw] local machine_id unavailable: host may not be installed or started; Connect may fail');
     return;
   }
   setTimeout(function () {
@@ -254,6 +366,7 @@ function retryMachineIdentity(n) {
         if (res && res[MACHINE_KEY] && !localMachineId) {
           localMachineId = res[MACHINE_KEY];
           console.log('[webai-claw] local machine_id (obtained late): ' + localMachineId);
+          scan();
         }
         if (res && res[PLATFORM_KEY] && !localPlatform) localPlatform = res[PLATFORM_KEY];
         if (!localMachineId) retryMachineIdentity(n + 1);
@@ -333,105 +446,107 @@ function getPort() {
                   ' gen=' + msg.gen + ' current=' + gen);
       return;
     }
+    if (msg.type === 'bound') {
+      if (msg.bound) {
+        // Snapshot everything visible at bind time: a block that existed
+        // before Connect must never run just because the page became bound.
+        try {
+          adapter.findBlocks().forEach(function (el) {
+            var b = parseBlock(blockTextOf(el));
+            if (b) markProcessed(b.id);
+          });
+        } catch (e) {}
+      }
+      bound = !!msg.bound;
+      boundSession = bound ? normalizeSession(msg.session || '') : null;
+      boundAi = bound ? (msg.ai || null) : null;
+      if (bound) { paused = false; autoSentCount = 0; setPauseStorage(false); }
+      console.log('[webai-claw] binding ' + (bound ? 'active: ' + boundSession + ' / ' + boundAi : 'released'));
+      if (bound) scan();
+      return;
+    }
+    if (msg.type === 'do_connect') {
+      sendConnectAttachment(msg.config || {});
+      return;
+    }
+    if (msg.type === 'continue') {
+      paused = false;
+      autoSentCount = 0;
+      setPauseStorage(false);
+      scan();
+      return;
+    }
+    if (msg.type === 'popup_stop') {
+      abortChain('user clicked stop in popup');
+      return;
+    }
     if (msg.type === 'file') {
+      if (!bound || (boundSession && sessionKeyOf() !== boundSession)) return;
       onFileArrived(msg);
     } else if (msg.type === 'result') {
       delete inFlight[msg.id];
-      var text = formatResult(msg);
       delete cmdById[msg.id];
+      if (!currentBindingMatches(msg)) {
+        console.log('[webai-claw] dropping result for stale binding id=' + msg.id);
+        return;
+      }
+      var text = formatResult(msg);
       pendingResults.push(text);
       scheduleFlush();
     } else if (msg.type === 'error' && msg.id) {
       delete inFlight[msg.id];
       delete cmdById[msg.id];
-      pendingResults.push('' + (msg.error || 'unknown error'));
+      if (!currentBindingMatches(msg)) {
+        console.log('[webai-claw] dropping error for stale binding id=' + msg.id);
+        return;
+      }
+      pendingResults.push('[claw:error] id=' + msg.id + ' error=' + (msg.error || 'unknown error'));
       scheduleFlush();
-    } else if (msg.type === 'busy' && msg.id) {
-      // 5s grace rejection: fill-only; tell the user what's running and what was rejected
-      delete inFlight[msg.id];
-      delete cmdById[msg.id];
-      fillOnly('⏳ Local host is busy: `' + String(msg.running_cmd || '').slice(0, 120) +
-               '` has been running for ' + (msg.running_for_s || 0) + 's; ' +
-               'your command `' + String(msg.rejected_cmd || '').slice(0, 120) +
-               '` was not executed (5s grace elapsed). You can manually resend it later.');
     }
     // progress heartbeat frames just keep the long-lived connection alive; don't disturb the page
   });
   pagePort.onDisconnect.addListener(function () {
     pagePort = null;
+    bound = false;
+    paused = false;
+    setPauseStorage(false);
     Object.keys(inFlight).forEach(function (id) {
       fillBack('Connection to the extension background lost; result unknown.');
     });
     inFlight = {};
+    // The MV3 worker may have been suspended/restarted; reconnect once so the
+    // popup can still find this tab. Do not retry if the extension itself was
+    // reloaded (contextDead).
+    if (!contextDead) {
+      setTimeout(function () {
+        if (contextDead || pagePort) return;
+        try { getPort(); } catch (e) {}
+      }, 1000);
+    }
   });
+  notifyHello();
   return pagePort;
 }
 
-// ---------- M4 strict addressing (UUID) ----------
-// the host field only accepts machine_id (UUID); hostname is just a human-readable label, not used for matching.
-// hostnames can collide or be changed; they can't serve as identity.
-function hostMatches(want) {
-  return !!localMachineId && want === localMachineId;
-}
-
-// Strict-addressing gate (unified for exec/probe/attach):
-//   'pass'   allow; 'defer' defer (machine_id not ready, don't mark processed);
-//   'ignore' handled (addressed to another machine / circuit-broken); 'nag' missing host, go self-heal.
-function checkHostGate(block) {
-  if (!localMachineId) {
-    console.log('[webai-claw] machine_id not ready; block ' + block.id + ' deferred');
-    return 'defer';
+function currentBindingMatches(msg) {
+  if (boundSession) {
+    if (msg.session && normalizeSession(msg.session) !== boundSession) return false;
+    if (sessionKeyOf() !== boundSession) return false;
   }
-  // bootstrap exemption: __diag__ is the AI's only channel to obtain machine_id; it can't require host itself.
-  // note: diag travels as an exec block (special-cased in host.py run_exec), kind-agnostic.
-  if ((block.cmd || '').trim() === '__diag__') return 'pass';
-  if (block.host === '*') return 'pass';  // explicit broadcast
-  if (block.host && hostMatches(block.host)) return 'pass';  // addressed to this machine
-  if (block.host) {
-    console.log('[webai-claw] block ' + block.id + ' targets ' + block.host + ', mismatch with this machine; silently ignoring');
-    markProcessed(block.id);
-    return 'ignore';
-  }
-  return 'nag';  // no host written: go through the nag self-heal flow
-}
-
-var nagCountById = {};
-var nagTotalThisGen = 0;
-var NAG_PER_BLOCK = 1;  // max 1 nag per block
-var NAG_GLOBAL_CAP = 5; // global cap per tab per generation; beyond that, console only (prevents the AI from feigning ignorance to spam)
-
-// Missing-host self-heal nag: slap the local UUID in front of the AI and ask it to resend with a new id.
-// Force-send (bypasses mh_auto_send, same level as the stop notice) — this is a protocol-correction
-// message the AI must see. Plain text, no claw-exec block, won't self-trigger; selfActing handled by trySend.
-function nagMissingHost(block) {
-  var n = nagCountById[block.id] || 0;
-  if (n >= NAG_PER_BLOCK || nagTotalThisGen >= NAG_GLOBAL_CAP) {
-    if (nagTotalThisGen >= NAG_GLOBAL_CAP) {
-      console.log('[webai-claw] nag circuit-broken: block ' + block.id + ' missing host, nag cap reached; will not disturb further');
-    }
-    markProcessed(block.id);
-    return;
-  }
-  nagCountById[block.id] = n + 1;
-  nagTotalThisGen++;
-  var msg =
-    '⚠️ [webai-claw] received a command without a target machine UUID (id=' + block.id + '), not executed.\n' +
-    'Local UUID: ' + localMachineId + '\n' +
-    'Hostname: ' + (localHostname || '?') + ', platform: ' + (localPlatform || '?') + '\n' +
-    'Please resend the command: use a new id and add "host":"' + localMachineId + '" to the JSON first line.\n' +
-    '(`__diag__` is exempt from host; `"host":"*"` broadcasts — use with care.)';
-  console.log('[webai-claw] nag missing host: block ' + block.id + ' (time ' + (n + 1) + ')');
-  var ok = false;
-  try { ok = adapter.fillResult(msg); } catch (e) {
-    console.error('[webai-claw] nag fill-back failed: ', e);
-  }
-  if (ok) setTimeout(trySend, 300);
-  else console.log('[webai-claw] nag could not be filled into the input box; logging only');
-  markProcessed(block.id);
+  if (boundAi && msg.ai && msg.ai !== boundAi) return false;
+  return true;
 }
 
 // ---------- execute ----------
 function execBlock(block) {
+  // Only the bound page may execute. Other tabs/browsers (even with the
+  // same URL) have no binding and must stay silent.
+  if (!bound ||
+      (boundSession && sessionKeyOf() !== boundSession) ||
+      (boundAi && aiType() !== boundAi)) {
+    console.log('[webai-claw] block ' + block.id + ' ignored: page is not the bound owner');
+    return;
+  }
   // key: incomplete blocks (in DeepSeek, <code> may hold only the first JSON line with empty cmd)
   // are NOT marked processed; wait for the complete element (<pre>) before executing.
   if (!block.cmd) {
@@ -460,11 +575,15 @@ function execBlock(block) {
     getPort().postMessage({
       type: 'exec',
       id: block.id,
-      session: SESSION,
+      host: block.host,
+      session: sessionKeyOf(),
+      ai: aiType(),
+      binding_id: BINDING_ID,
       gen: gen,
       cmd: block.cmd,
       shell: block.shell,
-      timeout: block.timeout
+      timeout: block.timeout,
+      approved: !!block.approved
     });
     // only book it once sent: a postMessage throw means it never went out — don't mark
     // processed then, so the same block can be resent after refresh without losing the command
@@ -496,9 +615,15 @@ function b64ToBytes(b64) {
 }
 
 function attachBlock(block) {
-  if (!block.path) { fillBack('[attach ' + block.id + '] missing path'); return; }
+  if (!bound ||
+      (boundSession && sessionKeyOf() !== boundSession) ||
+      (boundAi && aiType() !== boundAi)) {
+    console.log('[webai-claw] attach ' + block.id + ' ignored: page is not the bound owner');
+    return;
+  }
+  if (!block.path) { fillBack('[claw:attach] id=' + block.id + ' error=missing path'); return; }
   if (!adapter || typeof adapter.uploadFile !== 'function') {
-    fillBack('[attach ' + block.id + '] adapter for current site does not support upload');
+    fillBack('[claw:attach] id=' + block.id + ' error=adapter for current site does not support upload');
     return;
   }
   inFlight[block.id] = true;
@@ -507,12 +632,13 @@ function attachBlock(block) {
   console.log('[webai-claw] attach ' + block.id + ' requesting file ' + block.path);
   try {
     getPort().postMessage({ type: 'read_file', id: block.id, path: block.path,
-                            session: SESSION, gen: gen });
+                            host: block.host, session: sessionKeyOf(), ai: aiType(),
+                            binding_id: BINDING_ID, gen: gen });
     markProcessed(block.id);  // book only once sent (same as execBlock): don't mark on send failure; resendable after refresh
   } catch (e) {
     delete inFlight[block.id]; delete attachMeta[block.id];
     if (contextDead) warnContextDead();
-    else fillBack('[attach ' + block.id + '] file request failed: ' + e.message);
+    else fillBack('[claw:attach] id=' + block.id + ' error=file request failed: ' + e.message);
   }
 }
 
@@ -522,41 +648,163 @@ function onFileArrived(msg) {
   delete inFlight[msg.id];
   var bytes;
   try { bytes = b64ToBytes(msg.b64); }
-  catch (e) { fillBack('[attach ' + msg.id + '] base64 decode failed: ' + e.message); return; }
+  catch (e) { fillBack('[claw:attach] id=' + msg.id + ' error=base64 decode failed: ' + e.message); return; }
   console.log('[webai-claw] file arrived ' + msg.name + ' ' + bytes.length + ' bytes');
   var res;
   try {
     res = adapter.uploadFile({ name: msg.name, mime: msg.mime, bytes: bytes });
   } catch (e) {
-    fillBack('[attach ' + msg.id + '] adapter upload threw: ' + e.message);
+    fillBack('[claw:attach] id=' + msg.id + ' error=adapter upload threw: ' + e.message);
     return;
   }
   // uploadFile may return {ok, why} synchronously or a Promise (gemini needs the upload menu
   // opened first, then waits for the input to render). Promise.resolve covers both.
   Promise.resolve(res).then(function (r) {
     if (!r || !r.ok) {
-      fillBack('[attach ' + msg.id + '] upload failed: ' + ((r && r.why) || 'unknown'));
+      fillBack('[claw:attach] id=' + msg.id + ' error=upload failed: ' + ((r && r.why) || 'unknown'));
       return;
     }
-    fillBack('[attach ' + msg.id + '] file injected ' + msg.name + ' (' + bytes.length + ' bytes)');
+    fillBack('[claw:attach] id=' + msg.id + ' file=' + msg.name + ' size=' + bytes.length + ' status=injected');
     if (meta.text) {
       try { adapter.fillResult(meta.text); } catch (e) {}
     }
     if (meta.send) setTimeout(trySend, 500);
   }, function (e) {
-    fillBack('[attach ' + msg.id + '] adapter upload threw: ' + (e && e.message || e));
+    fillBack('[claw:attach] id=' + msg.id + ' error=adapter upload threw: ' + (e && e.message || e));
   });
 }
 
 
+function setPauseStorage(on) {
+  try {
+    var obj = {};
+    obj.mh_paused = !!on;
+    obj.mh_pause_count = on ? autoSentCount : 0;
+    chrome.storage.local.set(obj);
+  } catch (e) {}
+}
+
+function sendConnectAttachment(config) {
+  if (!adapter || typeof adapter.uploadFile !== 'function') {
+    fillOnly('[connect] this site does not support file upload; cannot send the guide');
+    return;
+  }
+  var session = sessionKeyOf();
+  var ai = aiType();
+  var lines = [];
+  lines.push('# webai-claw 连接配置');
+  lines.push('');
+  lines.push('## 本机');
+  lines.push('- host: ' + (config.machine_id || localMachineId || ''));
+  lines.push('- session: ' + session);
+  lines.push('- ai: ' + ai);
+  lines.push('- hostname: ' + (config.hostname || localHostname || ''));
+  lines.push('- platform: ' + (config.platform || localPlatform || ''));
+  lines.push('- shell: ' + (config.shell || ''));
+  lines.push('- protocol: 3');
+  lines.push('- host_version: ' + (config.host_version || ''));
+  lines.push('');
+  lines.push('## 协议');
+  lines.push(config.guide || '(AI-AGENT.md missing; re-run install.py)');
+  if (config.handoff) {
+    lines.push('');
+    lines.push('## 上一次会话交接');
+    lines.push(config.handoff);
+  }
+  var text = lines.join('\n');
+  var bytes;
+  try { bytes = new TextEncoder().encode(text); }
+  catch (e) { fillOnly('[connect] failed to encode guide: ' + e.message); return; }
+  var res;
+  try {
+    res = adapter.uploadFile({ name: 'webai-claw-connect.txt', mime: 'text/plain', bytes: bytes });
+  } catch (e) {
+    fillOnly('[connect] adapter upload threw: ' + e.message);
+    return;
+  }
+  Promise.resolve(res).then(function (r) {
+    if (!r || !r.ok) {
+      fillOnly('[connect] guide upload failed: ' + ((r && r.why) || 'unknown'));
+      return;
+    }
+    var targetHost = config.machine_id || localMachineId || '?';
+    var note = '已连接本机 ' + (config.hostname || 'this computer') +
+      '（' + (config.platform || '?') + ' / ' + (config.shell || '?') + '）。\n' +
+      'host: ' + targetHost + '\nsession: ' + session + '\nai: ' + ai + '\n' +
+      '请阅读附件中的协议。回复时用普通文字明确写出：\n' +
+      '“已连接 <hostname>（<platform>）。后续命令将以 host:' + targetHost +
+      ' 在 <platform> 上执行。”\n' +
+      '之后每条 claw 块必须写 "host":"' + targetHost + '" 和 "v":3；' +
+      'session/ai 不要写，扩展会补。\n' +
+      '如果同一对话出现新的 Connect 附件，以最新附件的 host 为准；用户指定其他 UUID 时按用户的来。\n' +
+      '回复确认后等待任务。';
+    var ok = false;
+    try { ok = adapter.fillResult(note); } catch (e) { ok = false; }
+    if (!ok) { fillOnly('[connect] connected, but could not fill the input box'); return; }
+    try {
+      chrome.storage.local.get([AUTO_KEY], function (r2) {
+        if (!r2 || r2[AUTO_KEY] !== false) setTimeout(trySend, 1000);
+      });
+    } catch (e) {}
+  }, function (e) {
+    fillOnly('[connect] adapter upload threw: ' + (e && e.message || e));
+  });
+}
+
+function diagBlock(block) {
+  if (!bound) return;
+  inFlight[block.id] = true;
+  cmdById[block.id] = 'diag';
+  try {
+    getPort().postMessage({
+      type: 'diag', id: block.id, host: block.host,
+      session: sessionKeyOf(), ai: aiType(), binding_id: BINDING_ID, gen: gen
+    });
+    markProcessed(block.id);
+  } catch (e) {
+    delete inFlight[block.id];
+    delete cmdById[block.id];
+    fillBack('[claw:error] id=' + block.id + ' error=' + e.message);
+  }
+}
+
+function summaryBlock(block) {
+  if (!bound) return;
+  var summaryText = block.cmd || block.text || '';
+  if (!summaryText) {
+    markProcessed(block.id);
+    fillBack('[claw:error] id=' + block.id + ' error=summary body is empty');
+    return;
+  }
+  if (summaryText.length > MAX_CMD_BYTES) {
+    markProcessed(block.id);
+    fillBack('[claw:error] id=' + block.id + ' error=summary too large (512KB cap)');
+    return;
+  }
+  inFlight[block.id] = true;
+  cmdById[block.id] = 'summary';
+  try {
+    getPort().postMessage({
+      type: 'summary', id: block.id, text: summaryText, host: block.host,
+      session: sessionKeyOf(), ai: aiType(), binding_id: BINDING_ID, gen: gen
+    });
+    markProcessed(block.id);
+  } catch (e) {
+    delete inFlight[block.id];
+    delete cmdById[block.id];
+    fillBack('[claw:error] id=' + block.id + ' error=' + e.message);
+  }
+}
+
 // ---------- DOM probe (read-only, handled locally, never touches host) ----------
 function probeBlock(block) {
+  if (!bound) return;
   markProcessed(block.id);
-  if (!block.sel) { fillBack('[probe ' + block.id + '] missing sel field'); return; }
+  if (!block.sel) { fillBack('[claw:probe] id=' + block.id + ' error=missing sel field'); return; }
   var nodes;
   try { nodes = document.querySelectorAll(block.sel); }
-  catch (e) { fillBack('[probe ' + block.id + '] selector syntax error: ' + e.message); return; }
-  var lines = ['[probe ' + block.id + '] sel=' + block.sel + '  matched ' + nodes.length];
+  catch (e) { fillBack('[claw:probe] id=' + block.id + ' error=selector syntax error: ' + e.message); return; }
+  var lines = ['[claw:probe] id=' + block.id + ' sel=' + block.sel + ' matched=' + nodes.length];
   nodes.forEach(function (n, i) {
     if (i >= 10) { return; }
     var rect = n.getBoundingClientRect();
@@ -579,8 +827,15 @@ function probeBlock(block) {
 
 function formatDiag(res) {
   var lines = [];
-  lines.push('webai-claw diag  id=' + res.id);
-  lines.push('host: ' + (res.hostname || '?') + '  platform: ' + (res.platform || '?') + '  pid: ' + (res.pid || '?'));
+  lines.push('[claw:diag] id=' + res.id + ' host=' + (res.hostname || '?') +
+             ' platform=' + (res.platform || '?') + ' pid=' + (res.pid || '?'));
+  if (res.machine_id) lines.push('machine: ' + res.machine_id);
+  if (res.session) lines.push('session: ' + res.session + '  ai: ' + (res.ai || '?'));
+  if (res.lease) {
+    lines.push('lease: state=' + (res.lease.state || '?') +
+               ' binding=' + ((res.lease.owner || {}).binding_id || '-') +
+               ' task=' + (res.lease.task_id || '-'));
+  }
   lines.push('history: ' + res.history_size + '/' + res.history_limit);
   if (res.recent && res.recent.length) {
     lines.push('recent:');
@@ -603,8 +858,17 @@ function formatResult(res) {
   }
   var secs = ((res.duration_ms || 0) / 1000).toFixed(1);
   var lines = [];
-  lines.push('webai-claw result id=' + res.id + ' exit=' + res.exit_code +
-             ' ' + secs + 's host=' + (res.hostname || '?'));
+  var head = '[claw:result] id=' + res.id + ' ok=' + (res.ok ? 'true' : 'false') +
+             ' exit=' + res.exit_code + ' duration=' + secs + 's';
+  if (res.machine_id) head += ' machine=' + res.machine_id;
+  if (res.session) head += ' session=' + res.session;
+  if (res.ai) head += ' ai=' + res.ai;
+  if (res.platform) head += ' platform=' + res.platform;
+  if (res.hostname) head += ' host=' + res.hostname;
+  if (res.timeout) head += ' timeout=' + res.timeout;
+  if (res.approved) head += ' approved=true';
+  if (res.killed) head += ' killed=true';
+  lines.push(head);
   var cmd = cmdById[res.id];
   if (cmd) {
     var first = cmd.split('\n')[0];
@@ -612,7 +876,7 @@ function formatResult(res) {
     var extra = n > 1 ? ' (' + n + ' lines total)' : '';
     lines.push('cmd: ' + (first.length > 120 ? first.slice(0, 120) + '…' : first) + extra);
   }
-  if (res.error) lines.push('err: ' + res.error);
+  if (res.error) lines.push('error: ' + res.error);
   if (res.stdout) lines.push(res.stdout.replace(/\s+$/, ''));
   if (res.stderr) {
     lines.push('');
@@ -645,11 +909,25 @@ function fillBack(text) {
 function maybeAutoSend() {
   try {
     chrome.storage.local.get([AUTO_KEY], function (res) {
-      if (res && res[AUTO_KEY]) {
+      // default ON: only an explicit false disables auto-send
+      if (!res || res[AUTO_KEY] !== false) {
         // the send button renders after input appears; frameworks may lag on big inserts — retry up to 4 times
         var n = 0;
         (function attempt() {
-          if (doClickSend()) { console.log('[webai-claw] auto-sent'); return; }
+          if (doClickSend()) {
+            autoSentCount++;
+            console.log('[webai-claw] auto-sent (' + autoSentCount + '/' + PAUSE_AFTER + ')');
+            if (autoSentCount >= PAUSE_AFTER && !paused) {
+              paused = true;
+              setPauseStorage(true);
+              var note = '[claw:paused] 已连续自动执行 ' + PAUSE_AFTER +
+                ' 条命令，已暂停。请在扩展 popup 点“继续”或“停止”。';
+              try { adapter.fillResult(note); }
+              catch (e) { console.error('[webai-claw] pause note fill failed: ', e); }
+              setTimeout(trySend, 300);
+            }
+            return;
+          }
           if (++n < 4) setTimeout(attempt, 400);
           else console.log('[webai-claw] auto-send: send button never found after retries; staying fill-only');
         })();
@@ -684,11 +962,57 @@ function scan() {
     return;
   }
   if (!els || !els.length) return;
+  // Before the popup binds this page, absorb any v3 blocks already in the
+  // chat. Otherwise connecting later would execute historical commands.
+  if (!bound) {
+    els.forEach(function (el) {
+      var b = parseBlock(blockTextOf(el));
+      if (b && !processed[b.id] && !inFlight[b.id]) {
+        baselineIds[b.id] = true;
+        markProcessed(b.id);
+        console.log('[webai-claw] absorbed pre-binding block ' + b.id);
+      }
+    });
+    return;
+  }
+  if (paused) return;        // consecutive auto-run pause: wait for Continue/Stop in the popup
+  if (boundSession && sessionKeyOf() !== boundSession) {
+    var nowSession = sessionKeyOf();
+    if (isProvisionalSession(boundSession) &&
+        !isProvisionalSession(nowSession) &&
+        sameOrigin(boundSession, nowSession)) {
+      // Muse new chat: /thread/new (or the bare origin) becomes
+      // /thread/<uuid> when the first message creates the thread. This is the
+      // same page/binding, so adopt the real session instead of disconnecting.
+      var oldSession = boundSession;
+      boundSession = nowSession;
+      try {
+        getPort().postMessage({
+          type: 'session_adopted', binding_id: BINDING_ID,
+          old_session: oldSession, session: nowSession, ai: aiType()
+        });
+      } catch (e) {}
+      console.log('[webai-claw] adopted real session ' + nowSession +
+                  ' from ' + oldSession);
+      // continue scanning this pass; do not release the binding
+    } else {
+      bound = false;
+      try {
+        getPort().postMessage({
+          type: 'session_changed', binding_id: BINDING_ID,
+          session: nowSession, ai: aiType()
+        });
+      } catch (e) {}
+      console.log('[webai-claw] page session changed; binding released locally');
+      return;
+    }
+  }
+  if (boundAi && aiType() !== boundAi) return;
   els.forEach(function (el) {
     var text = blockTextOf(el);
     var block = parseBlock(text);
     if (!block || processed[block.id] || inFlight[block.id]) return;
-    if (inWarmup() || baselineIds[block.id] || PLACEHOLDER_IDS[block.id]) {
+    if (inWarmup() || baselineIds[block.id] || isPlaceholderId(block.id)) {
       if (!baselineIds[block.id]) {
         baselineIds[block.id] = true;
         console.log('[webai-claw] warmup absorbed history block ' + block.id);
@@ -696,7 +1020,20 @@ function scan() {
       markProcessed(block.id);
       return;
     }
-    if (block.kind !== 'probe' && block.kind !== 'attach' && !block.cmd && incompleteAt[block.id] && Date.now() - incompleteAt[block.id] < 5000) return;
+    if ((block.kind === 'exec' || block.kind === 'summary') &&
+        !block.cmd && incompleteAt[block.id] && Date.now() - incompleteAt[block.id] < 5000) return;
+    var target = targetGate(block);
+    if (target === 'defer') return;  // machine UUID not cached yet; retry after pong
+    if (target === 'missing') {
+      warnMissingHost(block);
+      markProcessed(block.id);
+      return;
+    }
+    if (target === 'ignore') {
+      console.log('[webai-claw] block ' + block.id + ' targets another host; ignoring');
+      markProcessed(block.id);
+      return;
+    }
     if (userAborted) {
       // a new block after abort = user kept chatting: re-arm; later blocks execute normally.
       // blocks seen before the abort were marked processed in abortChain and won't resurrect.
@@ -716,14 +1053,27 @@ function scan() {
       if (userAborted || processed[block.id] || inFlight[block.id]) return;
       var again = parseBlock(blockTextOf(el));
       if (!again) return;
-      // M4 strict-addressing gate (unified for exec/probe/attach)
-      var gate = checkHostGate(again);
-      if (gate === 'defer') return;              // machine_id not ready: defer, don't mark
-      if (gate === 'ignore') return;             // addressed elsewhere / circuit-broken: already marked processed
-      if (gate === 'nag') { nagMissingHost(again); return; }
+      var fireTarget = targetGate(again);
+      if (fireTarget === 'defer') return;
+      if (fireTarget === 'missing') {
+        warnMissingHost(again);
+        markProcessed(again.id);
+        return;
+      }
+      if (fireTarget === 'ignore') {
+        markProcessed(again.id);
+        return;
+      }
+      // Re-check the binding at fire time: the page may have navigated
+      // between scheduling and execution.
+      if (!bound ||
+          (boundSession && sessionKeyOf() !== boundSession) ||
+          (boundAi && aiType() !== boundAi)) return;
       console.log('[webai-claw] block ' + block.id + ' stable, executing');
       if (again.kind === 'probe') probeBlock(again);
       else if (again.kind === 'attach') attachBlock(again);
+      else if (again.kind === 'diag') diagBlock(again);
+      else if (again.kind === 'summary') summaryBlock(again);
       else execBlock(again);
     }, STABLE_MS);
   });
@@ -734,6 +1084,8 @@ document.addEventListener('click', function (e) {
   var t = e.target;
   var btn = t && t.closest ? t.closest('button, [role="button"]') : null;
   if (!btn) return;
+  // a real user click (not our auto-send) resets the consecutive auto-run counter
+  autoSentCount = 0;
   if (!adapter.isStopButton || !adapter.isStopButton(btn)) return;
   abortChain('user clicked the stop/interrupt button');
 }, true);
@@ -750,13 +1102,14 @@ new MutationObserver(function () {
 loadProcessed(function () {
   pokeWarmup();
   scan();
-  console.log('[webai-claw] content script started v' + VERSION + ': only v>=2 blocks execute; results are fill-only by default.');
+  console.log('[webai-claw] content script started v' + VERSION + ': only exact v3 blocks execute; auto-send defaults on.');
 });
 chrome.storage.onChanged.addListener(function (changes, area) {
   if (area !== "local" || !changes[MACHINE_KEY]) return;
   var nv = changes[MACHINE_KEY].newValue;
-  if (!nv || localMachineId) return;
+  if (!nv || nv === localMachineId) return;
   localMachineId = nv;
+  console.log('[webai-claw] local machine_id updated: ' + localMachineId);
   try { scan(); } catch (e) {}
 });
 })();

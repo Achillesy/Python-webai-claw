@@ -12,5 +12,5 @@ execution-robustness lessons) was carried over into `ARCHITECTURE.md`, `ROADMAP.
 the redesigns from the ground up instead of branching.
 
 `webai-hands` (Chrome Web Store, v1.0.0) remains a separate, maintained
-product. The v3 fence (`claw-exec` / `"v":3`) keeps the two products from
+product. The v3 fence (`claw` / `"v":3`) keeps the two products from
 ever triggering each other.

@@ -5,7 +5,6 @@
 # 1. The Chrome Native Messaging registration (HKCU registry on Windows,
 #    the NativeMessagingHosts json on macOS).
 # 2. ~/.webai-claw/ (host program, logs, skills, machine identity).
-# 3. The legacy ~/.config/webai-claw/ identity file, if still present.
 #
 # Pass --yes to skip the confirmation prompt.
 
@@ -15,7 +14,6 @@ import sys
 
 HOST_NAME = "com.webai.claw"
 INSTALL_DIR = os.path.expanduser("~/.webai-claw")
-LEGACY_DIR = os.path.join(os.path.expanduser("~"), ".config", "webai-claw")
 
 
 def unregister():
@@ -45,19 +43,17 @@ def unregister():
 
 
 def remove_dirs():
-    for path in (INSTALL_DIR, LEGACY_DIR):
-        if os.path.isdir(path):
-            shutil.rmtree(path)
-            print("Removed directory: %s" % path)
-        else:
-            print("Directory not present, skipping: %s" % path)
+    if os.path.isdir(INSTALL_DIR):
+        shutil.rmtree(INSTALL_DIR)
+        print("Removed directory: %s" % INSTALL_DIR)
+    else:
+        print("Directory not present, skipping: %s" % INSTALL_DIR)
 
 
 def main():
     print("This will unregister the webai-claw native host and delete:")
     print("  - the Chrome Native Messaging registration for %s" % HOST_NAME)
     print("  - %s" % INSTALL_DIR)
-    print("  - %s (legacy)" % LEGACY_DIR)
     if "--yes" not in sys.argv:
         try:
             answer = input("Continue? [y/N] ").strip().lower()

@@ -3,22 +3,38 @@
 <head>
 <meta charset="utf-8">
 <style>
-  body { font: 13px/1.6 system-ui, sans-serif; margin: 12px; width: 264px; color: #222; }
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 12px; width: 300px; color: #222; }
   h1 { font-size: 14px; margin: 0 0 6px; }
-  .row { margin: 8px 0; }
-  button { cursor: pointer; }
+  .row { margin: 7px 0; }
   .mut { color: #666; font-size: 12px; }
+  button { cursor: pointer; margin-right: 4px; }
+  button:disabled { cursor: default; opacity: 0.55; }
+  .ok { color: #2e7d32; }
+  .warn { color: #b26a00; }
+  .err { color: #c62828; }
+  .detail { white-space: pre-wrap; word-break: break-word; }
 </style>
 </head>
 <body>
   <h1>webai-claw <span id="ver" class="mut" style="font-weight:normal"></span></h1>
-  <div class="row">Local host: <span id="status">not tested</span></div>
-  <div class="row"><button id="ping">Test Bridge</button></div>
-  <div class="row">Machine ID: <span id="mid" class="mut">unknown</span> <button id="copymid">Copy UUID</button></div>
+  <div class="row">Host: <span id="host">checking…</span></div>
+  <div class="row">State: <span id="state">checking…</span></div>
+  <div class="row mut detail" id="detail"></div>
+  <div class="row">
+    <button id="connect" disabled>Connect</button>
+    <button id="disconnect" hidden>Disconnect</button>
+    <button id="interrupt" hidden>Interrupt</button>
+  </div>
+  <div class="row">
+    <button id="continue" hidden>Continue</button>
+    <button id="stop" hidden>Stop</button>
+  </div>
   <label class="row" style="display:block">
-    <input type="checkbox" id="autosend"> Auto-send after result is filled back
+    <input type="checkbox" id="autosend" checked> Auto-send after result is filled back
   </label>
-  <div class="mut">Default off: the result is only filled into the input box; you confirm before sending. When on, the command result is sent automatically as soon as it comes back.</div>
+  <div class="mut">Default on. After 10 consecutive automatic sends the extension pauses and asks Continue/Stop.</div>
+  <div class="row">Machine ID: <span id="mid" class="mut">unknown</span> <button id="copymid">Copy UUID</button></div>
+  <div class="row"><button id="ping">Test Bridge</button></div>
   <div class="row mut">Useful? Buy the author a coffee: <a href="https://ko-fi.com/achillesy" target="_blank">Ko-fi</a> · <a href="https://paypal.me/achillesnewman" target="_blank">PayPal</a></div>
   <script src="popup.js"></script>
 </body>

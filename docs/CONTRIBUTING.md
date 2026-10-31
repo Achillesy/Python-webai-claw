@@ -20,7 +20,7 @@ Thanks for helping out. This project is small on purpose — please keep it that
    Load unpacked → select `extension/`.
 3. Install the host: `python3 native-host/install.py` (macOS/Linux) or run
    `native-host/install_windows.bat` (Windows).
-4. Click the extension icon → "Ping" → shows `connected: <hostname>`.
+4. Click the extension icon → "Test Bridge" → shows `connected: <hostname>`.
 
 After changing extension code: **reload the extension** in `chrome://extensions`
 (page refresh alone is not enough — the service worker keeps the old code).
@@ -28,27 +28,30 @@ After changing `host.py`: reload the extension so it respawns the host.
 
 ## Adding a new site adapter
 
-1. Read `docs/archive/AI-EVOLUTION.md` — it's the adapter author's guide.
+1. Read `AI-AGENT.md` and the two current adapters (`deepseek.js`, `muse.js`).
 2. Copy `extension/adapters/muse.js` (~100 lines) as a starting point.
-3. Implement the adapter interface: block detection, `fillResult`, `trySend`,
-   and `uploadFile` (see `docs/archive/AI-EVOLUTION.md` for the contract).
+3. Implement the adapter interface: `findBlocks`, `sessionKey`, `ai`,
+   `fillResult`, `clickSend`, `isStopButton`, and `uploadFile`.
 4. Register the site in `extension/manifest.json` (`content_scripts[].matches`
    and `host_permissions`).
-5. Use the `probe` block (`AI-GUIDE.md` §11) to inspect the site's DOM
+5. Use the `probe` block (`AI-AGENT.md` §2.2) to inspect the site's DOM
    (input box, send button, `input[type=file]`) before writing selectors.
 6. Verify live: exec round-trip, result fill-back, auto-send, and an `attach`
    upload end-to-end.
 
 ## Block protocol
 
-AI assistants talk to the bridge with fenced code blocks (`AI-GUIDE.md`):
+AI assistants talk to the bridge with fenced `claw` code blocks and exact
+`"v":3` (`AI-AGENT.md`). The five kinds are:
 
 - `{"claw":"exec", ...}` — run a shell command on the host
 - `{"claw":"probe", ...}` — read-only DOM inspection (page-local, never hits host)
 - `{"claw":"attach", ...}` — upload a local file as a chat attachment
+- `{"claw":"diag", ...}` — host/lease/history diagnostics
+- `{"claw":"summary", ...}` — write the handoff summary for the next Connect
 
 Keep the protocol backward compatible. New block kinds need a section in
-`AI-GUIDE.md` and a security review.
+`AI-AGENT.md` and a security review.
 
 ## Release (Chrome Web Store)
 

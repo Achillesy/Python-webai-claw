@@ -4,10 +4,9 @@
 #
 # Does three things:
 # 1. Copies the host program into ~/.webai-claw/ (log/ and skill/
-#    subdirectories are created; a machine.json from the legacy
-#    ~/.config/webai-claw/ location is migrated so the machine
-#    identity is preserved).
-# 2. Copies the AI operator guides (AI-GUIDE.md / AI-BLENDER.md, from the
+#    subdirectories are created) and creates machine.json once if absent;
+#    reinstalls preserve the existing machine identity.
+# 2. Copies the AI operator guides (AI-AGENT.md / AI-BLENDER.md, from the
 #    repo root) into ~/.webai-claw/ so store users without a checkout
 #    have them locally; refreshed on every reinstall.
 # 3. Registers com.webai.claw.json with Chrome: HKCU registry on
@@ -21,6 +20,8 @@ import json
 import os
 import shutil
 import sys
+import time
+import uuid
 
 HOST_NAME = "com.webai.claw"
 EXTENSION_IDS = [
@@ -39,15 +40,14 @@ INSTALL_DIR = os.path.expanduser("~/.webai-claw")
 HOST_FILES = ["host.py", "host.sh", "host.bat", "ctx_summary.py",
               "skill/mcp_exec.py"]  # Blender MCP socket client (fixed path below)
 # AI operator guides live at the repo root, not under native-host/.
-DOC_FILES = ["AI-GUIDE.md", "AI-BLENDER.md"]
+DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md"]
 # Where to fetch the host program when install.py is downloaded standalone
 # (one-line install). Pinned to main; change to a tag if you need a fixed version.
 # GitHub is tried first, then the Gitee mirror (for users in China where
 # GitHub raw is slow or blocked).
 HOST_BASE_URL = "https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host"
 HOST_MIRROR_URL = "https://gitee.com/achillesy/Python-webai-claw/raw/master/native-host"
-LEGACY_MACHINE_ID = os.path.join(
-    os.path.expanduser("~"), ".config", "webai-claw", "machine.json")
+MACHINE_ID_PATH = os.path.join(INSTALL_DIR, "machine.json")
 
 SKILL_README = """\
 # skill/
@@ -128,7 +128,7 @@ def fetch_files():
         for name in HOST_FILES:
             _download_one(name, net_base, mirrors)
         print("Downloaded host files.")
-    # AI operator guides (AI-GUIDE.md / AI-BLENDER.md): they live at the repo
+    # AI operator guides (AI-AGENT.md / AI-BLENDER.md): they live at the repo
     # root, not under native-host/. Store users have no checkout, so ship them
     # into the install dir where users can find them to upload into AI chats.
     # Unlike machine.json they are refreshed on every reinstall.
@@ -153,6 +153,65 @@ def fetch_files():
         print("Downloaded AI guides.")
 
 
+def _read_machine_id():
+    try:
+        with open(MACHINE_ID_PATH, "r", encoding="utf-8") as f:
+            mid = json.load(f).get("machine_id")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not mid:
+        return None
+    try:
+        uuid.UUID(str(mid))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return str(mid)
+
+
+def ensure_machine_id():
+    """Create machine.json once; reinstalls preserve the existing identity.
+
+    O_EXCL is the first-writer-wins primitive: concurrent installs cannot
+    mint two identities, and the loser reads the winner's value.
+    """
+    os.makedirs(INSTALL_DIR, exist_ok=True)
+    existing = _read_machine_id()
+    if existing:
+        try:
+            os.chmod(MACHINE_ID_PATH, 0o600)
+        except OSError:
+            pass
+        return existing
+    if os.path.exists(MACHINE_ID_PATH):
+        # Corrupt identity: keep a copy for debugging, then rotate explicitly.
+        backup = MACHINE_ID_PATH + ".corrupt." + time.strftime("%Y%m%d-%H%M%S")
+        try:
+            os.replace(MACHINE_ID_PATH, backup)
+            print("WARNING: invalid machine.json backed up to %s" % backup)
+        except OSError:
+            pass
+    mid = str(uuid.uuid4())
+    try:
+        fd = os.open(MACHINE_ID_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        existing = _read_machine_id()
+        if existing:
+            return existing
+        raise RuntimeError("machine.json was created by another process but is invalid")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"machine_id": mid}, f)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except OSError:
+            pass
+    try:
+        os.chmod(MACHINE_ID_PATH, 0o600)
+    except OSError:
+        pass
+    return mid
+
+
 def install_files():
     os.makedirs(os.path.join(INSTALL_DIR, "log"), exist_ok=True)
     os.makedirs(os.path.join(INSTALL_DIR, "skill"), exist_ok=True)
@@ -161,11 +220,8 @@ def install_files():
     if not os.path.exists(readme):
         with open(readme, "w", encoding="utf-8") as f:
             f.write(SKILL_README)
-    # Migrate machine identity from the legacy location (first run only).
-    new_id = os.path.join(INSTALL_DIR, "machine.json")
-    if not os.path.exists(new_id) and os.path.exists(LEGACY_MACHINE_ID):
-        shutil.copy2(LEGACY_MACHINE_ID, new_id)
-        print("Migrated machine identity from %s" % LEGACY_MACHINE_ID)
+    machine_id = ensure_machine_id()
+    print("Machine ID: %s" % machine_id)
     if sys.platform != "win32":
         os.chmod(os.path.join(INSTALL_DIR, "host.sh"), 0o755)
 
@@ -211,12 +267,12 @@ def main():
     print(
         "Next: install the extension from the Chrome Web Store:\n"
         "  %s\n"
-        "Then click the webai-claw toolbar icon — a \u2713 badge means the bridge is up."
+        "Open a supported AI chat, click the webai-claw toolbar icon, and click Connect."
         % STORE_URL
     )
     print(
         "AI guides installed to %s\n"
-        "  New task? Upload AI-GUIDE.md to your AI chat to begin (see README)."
+        "  Connect attaches AI-AGENT.md automatically; no manual upload needed."
         % INSTALL_DIR
     )
     return 0

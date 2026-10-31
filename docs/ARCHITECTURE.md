@@ -6,11 +6,10 @@
 ## 1. What it is
 
 webai-claw lets web AIs run commands on the user's own computer. The user chats
-with a web AI (DeepSeek, Claude, …) as usual; when the AI needs to *do*
-something, it writes a `claw-exec` code block. A Chrome extension picks the
-block up, a local Python host executes it, and the result is written back into
-the chat. No API keys — the web AI is the brain, the user's machine is its
-hands.
+with a web AI (DeepSeek, Muse, …) as usual; when the AI needs to *do*
+something, it writes a `claw` code block. A Chrome extension picks the block
+up, a local Python host executes it, and the result is written back into the
+chat. No API keys — the web AI is the brain, the user's machine is its hands.
 
 ## 2. Components
 
@@ -18,19 +17,20 @@ Three parts, deliberately small:
 
 ```
 AI chat page
-    │  ```claw-exec block
+    │  ```claw block  (v3, minimal JSON)
     ▼
 extension/                      Chrome MV3
-  ├─ adapters/<site>.js         per-site page scraping (findBlocks, fillResult, …)
-  ├─ content.js                 block pickup, warmup, dedup, result fill-back
-  ├─ background.js              service worker: queue / router / scheduler
-  └─ popup.html/js              bridge test, machine UUID display
+  ├─ adapters/<site>.js         per-site scraping (findBlocks, sessionKey, ai, …)
+  ├─ content.js                 block pickup, warmup, binding, dedup, fill-back
+  ├─ background.js              service worker: lease control / queue / router
+  └─ popup.html/js              Connect/Disconnect/Interrupt/Continue/Stop, UUID
     │  native messaging (4-byte LE length-prefixed JSON)
     ▼
 native-host/host.py             Python (stdlib only)
-  ├─ command executor           shell subprocess, timeout, output capture
-  ├─ machine identity           ~/.webai-claw/machine.json  (planned: install-time)
-  └─ execution history          ~/.webai-claw/exec_history.json  (planned: JSONL)
+  ├─ command executor           shell subprocess, timeout, process-tree kill
+  ├─ machine identity           ~/.webai-claw/machine.json (install-time)
+  ├─ machine lease              ~/.webai-claw/runtime/active.json
+  └─ execution history          ~/.webai-claw/log/exec_history.jsonl
 
 native-host/install.py          per-machine installer (idempotent)
 native-host/uninstall.py        symmetric removal
@@ -38,26 +38,35 @@ native-host/uninstall.py        symmetric removal
 
 ## 3. Data flow
 
-1. AI writes ```` ```claw-exec ```` with a JSON header
-   (`{"claw":"exec","id":"…","v":3,"host":"<uuid>","cmd":"…"}`).
+1. The AI writes a fenced `claw` block with a JSON header
+   (`{"claw":"exec","id":"…","host":"<UUID>","cmd":"…","v":3}`).
+   `host` is required and names the target machine. `session` and `ai` are
+   not written by the AI.
 2. `content.js` (via the site adapter) spots the block, parses the header,
-   checks the `v:3` gate and the block-id dedup set.
-3. `background.js` routes it to the native host (planned: one queue per
-   normalized source URL, fairly pumped into the serial host).
-4. `host.py` runs the command, streams `progress` heartbeats on long runs,
-   replies `result` / `error`.
-5. `content.js` writes the result back into the chat input as **plain text**
-   (never as a new block — results can't self-trigger).
+   checks the exact `v:3` gate, the `host` UUID against this machine, and the
+   block-id dedup set. Missing/mismatched `host` is not executed.
+3. `background.js` stamps `binding_id`, normalized `session`, and `ai`, then
+   forwards the command and its target `host` to the native host.
+4. `host.py` validates the target `host`, binding, session, and AI context
+   against the lease, runs the command, streams `progress` heartbeats on long
+   runs, and replies `result` / `error`.
+5. `background.js` routes the result back to the originating page port;
+   `content.js` re-checks the session/AI and writes it into the chat input as
+   **plain text** (never as a new block — results can't self-trigger).
 
 ## 4. Adapter registry
 
 One file per site: `extension/adapters/<site>.js`, self-registering on
 `window.__webaiClawAdapters[hostname]` with:
 
-- `findBlocks()` — locate candidate code elements
-- `blockText(el)` — extract block text (default: `el.innerText`)
+- `findBlocks()` — locate block-level code elements (never inline `<code>`)
+- `sessionKey()` — normalized conversation URL (origin + pathname)
+- `ai` — `deepseek` / `muse`
+- `blockText(el)` — optional block text extraction (default: `el.innerText`)
 - `fillResult(text)` — write a result into the chat input
-- `uploadFile({name, mime, bytes})` — optional, for `attach` blocks
+- `clickSend()` — click the site's send button
+- `isStopButton(el)` — optional, detect the site's stop/interrupt button
+- `uploadFile({name, mime, bytes})` — optional, for `attach` and Connect
 - `isActive()` — optional, page-applicability check
 
 Adding a new web AI = new adapter file + one `manifest.json` content-script
@@ -65,34 +74,47 @@ entry. Core `content.js` never changes.
 Currently wired: `muse.ai`, `chat.deepseek.com`
 (unwired adapter files exist for `aimode`, `chatgpt`, `gemini`).
 
-## 5. Identity model
+## 5. Identity and binding model
 
-- Identity answers "which machine": a uuid4 in `~/.webai-claw/machine.json`.
-- A block's `host` field addresses a machine; omitted = "this machine".
-- Planned: generation moves to `install.py` (install-time); `host.py` becomes
-  read-only and fails fast when identity is missing — never silently mints one
-  at runtime (see [`DECISIONS.md`](DECISIONS.md) §4).
-- One home always: `~/.webai-claw/` holds identity, logs, skills, history,
-  regardless of where `host.py` is launched from.
+- Identity answers "which machine": a uuid4 in `~/.webai-claw/machine.json`,
+  created atomically at install time. `host.py` is read-only and fails fast
+  when identity is missing.
+- The popup **Connect** writes a machine-global lease
+  `~/.webai-claw/runtime/active.json` with the page's random `binding_id`,
+  normalized `session`, and `ai`.
+- Every AI command carries a target `host` UUID from the latest Connect
+  attachment. Only the matching machine executes; other connected machines
+  ignore the block.
+- Muse new chats (`/thread/new` or the bare origin) may gain a real
+  `/thread/<uuid>` after the first message; the same `binding_id` adopts the
+  real session instead of disconnecting.
+- Only the bound page may execute. Other tabs/browsers on the same machine
+  (even with the same URL) get `busy` and are told to go to the owner.
+- A stale lease (dead host PID, browser gone, heartbeat older than 30s) is
+  cleaned on Connect; an orphan child process is terminated first.
+- One home always: `~/.webai-claw/` holds identity, lease, logs, history, and
+  the handoff summary, regardless of where `host.py` is launched from.
 
 ## 6. Execution model
 
-- The host executes commands **serially** (one at a time per host process).
-- Planned: per-URL queues in the extension instead of the old 5-second
-  cross-session busy rejection; `kill` message type terminating the process
-  tree; AI-supplied timeout cap; background watchdog recreating a wedged
-  native port (see [`ROADMAP.md`](ROADMAP.md)).
-- `~/.webai-claw/` is intentionally **shared** between browsers on one
-  machine — the bug class is unsafe concurrent state handling, not sharing
-  itself. History must be append-only (JSONL); identity creation must be
-  atomic-first-writer-wins.
+- Each native host process executes one command at a time; the machine lease
+  ensures only one host process owns execution.
+- `kill` cancels the current task and kills the process tree
+  (`killpg` on POSIX, `taskkill /T /F` on Windows).
+- Timeouts: default 120s, autonomous max 1200s, explicitly approved max 7200s.
+- After 10 consecutive auto-sends the page pauses and asks Continue/Stop.
+- `~/.webai-claw/` is intentionally **shared** between browsers on one machine.
+  History is append-only JSONL; identity creation is atomic first-writer-wins;
+  lease updates are lock-protected.
 
 ## 7. Trust model
 
 - The extension talks to the host only via native messaging; the host never
   listens on any network port.
 - The host manifest allowlists extension IDs (`allowed_origins`).
-- A block's `host` must match the machine UUID (strict addressing).
+- The AI block carries the target machine UUID in `host`; the extension
+  stamps the local binding/session/AI. The host rejects missing/mismatched
+  `host`, `binding_id`, `session`, or `ai`.
 - Execution history gives idempotent dedup: a block id never executes twice.
 - Open: command allowlist / dangerous-command confirmation / audit log
   (see [`ROADMAP.md`](ROADMAP.md) — product-level decision, not settled).
@@ -103,7 +125,7 @@ Currently wired: `muse.ai`, `chat.deepseek.com`
 |-----------------------|--------------------------|
 | `com.webai.hands`     | `com.webai.claw`         |
 | `~/.webai-hands/`     | `~/.webai-claw/`         |
-| ` ```muse-exec `      | ` ```claw-exec `         |
+| ` ```muse-exec `      | ` ```claw `              |
 | `{"muse":"exec",…}`   | `{"claw":"exec",…}`      |
 | `"v":2`               | `"v":3`                  |
 | `__museHandsAdapters` | `__webaiClawAdapters`    |

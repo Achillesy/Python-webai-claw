@@ -1,7 +1,8 @@
 ﻿# AI-BLENDER.md — 用 webai-claw 驱动 Blender（给 AI 助手）
 
 > 用户想在 Blender 里建模、挪东西、渲染时读这份。前提：webai-claw
-> 已装好、桥已通（安装见 README.md）。
+> 已装好、桥已通（安装见 README.md）。本文件里的命令块同样必须带
+> `host`（目标机 UUID）和 `"v":3`，规则见 AI-AGENT.md。
 
 ## 0. 原理
 
@@ -38,7 +39,7 @@ Blender Lab MCP 插件（Extension id `mcp`）。不要试图自己写一个 soc
     py -3 %USERPROFILE%\.webai-claw\skill\mcp_exec.py D:\tmp\do.py        （Windows）
     python3 ~/.webai-claw/skill/mcp_exec.py /tmp/do.py                    （macOS）
 
-典型做法：先发 claw-exec 块把 Python 代码写到临时文件，再发一块调
+典型做法：先发 claw 块把 Python 代码写到临时文件，再发一块调
 mcp_exec.py 执行它。两步分开，出错好定位。
 
 ## 3. 已验证能力（2026-10-02）

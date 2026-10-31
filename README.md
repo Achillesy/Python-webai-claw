@@ -3,14 +3,16 @@
 Give web AI claws on your computer — turn Q&A into output.
 
 webai-claw is a Chrome extension plus a local Python host. You chat with a web
-AI (ChatGPT, Claude, DeepSeek, …) as usual; when the AI needs to *do*
-something on your machine, it writes a `claw-exec` block. The extension picks
-the block up, the local host runs the command, and the result lands back in
-the chat.
+AI (DeepSeek, Muse, …) as usual; when the AI needs to *do* something on your
+machine, it writes a `claw` block. The extension picks the block up, the local
+host runs the command, and the result lands back in the chat.
 
-```claw-exec
-{"claw":"exec","id":"demo-1","v":3,"host":"<your-machine-uuid>","cmd":"echo hello"}
+```claw
+{"claw":"exec","id":"demo-1","host":"<UUID>","cmd":"echo hello","v":3}
 ```
+
+Every command must carry a target `host` UUID from the latest Connect
+attachment and exact `"v":3`. `session` and `ai` are stamped locally.
 
 No API keys. The AI you already pay for (or use for free) becomes the brain;
 your computer becomes its hands.
@@ -18,7 +20,7 @@ your computer becomes its hands.
 ## How it works
 
 1. **Extension** — content scripts watch supported AI chat pages for
-   `claw-exec` blocks; the background service worker dedups and routes them.
+   `claw` blocks; the background service worker dedups and routes them.
 2. **Native host** — a Python program registered with Chrome via Native
    Messaging. It executes commands and streams results back.
 3. **Installer** — `native-host/install.py` sets everything up per machine
@@ -36,11 +38,11 @@ python3 native-host/install.py
 # 2. Load the extension
 #    chrome://extensions → Developer mode → Load unpacked → extension/
 
-# 3. See the machine UUID in the toolbar popup, then teach an AI:
-#    upload ~/.webai-claw/AI-GUIDE.md to any web AI chat and ask it to run "echo hello".
+# 3. Open a supported AI chat, click the toolbar icon, then click Connect.
+#    The extension sends the operator guide and local config into the chat.
 ```
 
-To operators (AIs): read `AI-GUIDE.md`. For file-producing workflows
+To operators (AIs): read `AI-AGENT.md`. For file-producing workflows
 (Blender etc.): `AI-BLENDER.md`.
 
 ## Relationship to webai-hands
@@ -49,7 +51,7 @@ webai-claw is the rename-upgrade of
 [webai-hands](https://github.com/Achillesy/Python-webai-hands), rebuilt from
 the ground up (see [`docs/ORIGIN.md`](docs/ORIGIN.md)). The two products
 coexist: v2 blocks (`` `muse-exec ``) never trigger webai-claw and v3 blocks
-(`` `claw-exec ``) never trigger webai-hands.
+(`` `claw ``) never trigger webai-hands.
 
 ## License
 

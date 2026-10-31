@@ -5,11 +5,21 @@
 
   reg['chat.deepseek.com'] = {
     name: 'deepseek',
+    ai: 'deepseek',
 
+    // Only block-level code. Do NOT scan inline <code>: a JSON fragment in
+    // prose must never be mistaken for a command block. Prefer the inner
+    // <code> (it excludes any language label/copy button in the <pre>).
     findBlocks: function () {
-      return Array.prototype.slice.call(
-        document.querySelectorAll('pre, pre code, code')
-      );
+      var els = document.querySelectorAll('pre code');
+      if (els.length) return Array.prototype.slice.call(els);
+      return Array.prototype.slice.call(document.querySelectorAll('pre'));
+    },
+
+    // Conversation key = origin + pathname, no query/hash/trailing slash.
+    sessionKey: function () {
+      var p = location.pathname.replace(/\/+$/, '');
+      return location.origin + p;
     },
 
 
