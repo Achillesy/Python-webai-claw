@@ -21,6 +21,8 @@ All notable changes to webai-claw. Format follows [Keep a Changelog](https://kee
 - `summary` kind writes `~/.webai-claw/handoff.md` for the next Connect.
 - Host `connect`/`disconnect`/`status`/`bundle`/`kill`/`cancel` messages.
 - Muse `/thread/new` → `/thread/<uuid>` session adoption for the same binding.
+- Dedup is scoped by `(session, id)` in both content storage and host history;
+  reusing an id in a different chat no longer silently skips the command.
 
 ## [0.1.0] - 2026-10-12
 

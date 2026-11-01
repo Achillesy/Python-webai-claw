@@ -1,4 +1,4 @@
-﻿import os
+import os
 import time
 import socket
 
@@ -8,7 +8,7 @@ def run(msg, history):
     lines = ["# webai-claw session summary", "", "generated: " + time.strftime("%Y-%m-%d %H:%M:%S")]
     for k, v in items:
         out = (v.get("stdout_head") or v.get("stdout") or "").strip().replace(chr(10), " ")[:80]
-        lines.append("- %s  %s  %s" % (k, "ok" if v.get("ok") else "fail", out))
+        lines.append("- %s  %s  %s" % (v.get("id") or k, "ok" if v.get("ok") else "fail", out))
     d = os.path.join(os.path.expanduser("~"), ".webai-claw")
     os.makedirs(d, exist_ok=True)
     sp = os.path.join(d, "session-summary.md")

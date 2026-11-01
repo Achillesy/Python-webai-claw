@@ -48,7 +48,7 @@ HOST_CWD = os.path.expanduser("~")  # fixed cwd: predictable, idempotent
 HISTORY_PATH = os.path.join(LOG_DIR, "exec_history.jsonl")
 OLD_HISTORY_PATH = os.path.join(LOG_DIR, "exec_history.json")
 HISTORY_LOCK = os.path.join(LOG_DIR, "exec_history.lock")
-HISTORY_LIMIT = 500  # keep execution records for the most recent 500 ids
+HISTORY_LIMIT = 500  # keep the most recent 500 (session,id) execution records
 HISTORY_MAX_BYTES = 1 * 1024 * 1024  # compact when the JSONL file grows past 1MB
 HISTORY_LOCK_STALE = 10  # seconds; a crashed holder's lock file is removable after this
 STDOUT_HEAD_LEN = 500  # keep only the first 500 chars of output per entry (ctx_summary uses the first 80)
@@ -100,6 +100,12 @@ def slim_entry(key, v):
         # tolerate the old full-stdout field; take the first 500 chars
         "stdout_head": str(v.get("stdout_head") or v.get("stdout") or "")[:STDOUT_HEAD_LEN],
     }
+
+
+def _history_key(v):
+    """Dedup key: session + id. The same id in a different chat is a different command."""
+    v = v if isinstance(v, dict) else {}
+    return "%s|%s" % (v.get("session") or "", v.get("id") or "")
 
 
 def _iter_history(path):
@@ -161,11 +167,11 @@ def _release_lock(fd, path):
 
 
 def load_history():
-    """Read the append-only JSONL history; last writer for an id wins."""
+    """Read the append-only JSONL history; last writer for (session,id) wins."""
     hist = {}
     for obj in _iter_history(HISTORY_PATH):
-        key = str(obj.get("id"))
-        hist[key] = slim_entry(key, obj)
+        key = _history_key(obj)
+        hist[key] = slim_entry(str(obj.get("id") or ""), obj)
     # One-time migration from the old whole-file JSON history.
     if not hist and os.path.exists(OLD_HISTORY_PATH):
         try:
@@ -175,7 +181,9 @@ def load_history():
             raw = {}
         if isinstance(raw, dict):
             for k, v in raw.items():
-                hist[str(k)] = slim_entry(str(k), v)
+                v = dict(v) if isinstance(v, dict) else {}
+                v.setdefault("id", str(k))
+                hist[_history_key(v)] = slim_entry(str(k), v)
         if hist:
             try:
                 with open(HISTORY_PATH, "a", encoding="utf-8") as f:
@@ -203,8 +211,8 @@ def _compact_history_locked():
         return
     hist = {}
     for obj in _iter_history(HISTORY_PATH):
-        key = str(obj.get("id"))
-        hist[key] = slim_entry(key, obj)
+        key = _history_key(obj)
+        hist[key] = slim_entry(str(obj.get("id") or ""), obj)
     hist = _trim_history(hist)
     tmp = HISTORY_PATH + ".tmp.%d" % os.getpid()
     try:
@@ -618,9 +626,11 @@ def run_exec(msg, cancel_event=None):
     # Two host processes (Chrome/Edge) share the home dir: re-read before
     # dedup so a just-finished command in the other browser is visible.
     refresh_history()
-    if rid in HISTORY:
-        log("duplicate id=%s, returning cached" % rid)
-        h = HISTORY[rid]
+    hkey = _history_key({"id": rid, "session": msg.get("session") or ""})
+    if hkey in HISTORY:
+        log("duplicate id=%s session=%s, returning cached" %
+            (rid, msg.get("session") or ""))
+        h = HISTORY[hkey]
         # dedup hit: honestly report "this is cached"; output is summary only (full output was filled back into the page at the time)
         return {
             "type": "result",
@@ -771,7 +781,7 @@ def run_exec(msg, cancel_event=None):
     res["approved"] = approved
     res["ts"] = int(time.time())
     # slimmed store: metadata + output summary + session/ai only
-    HISTORY[rid] = {
+    HISTORY[hkey] = {
         "id": rid,
         "ok": res["ok"],
         "exit_code": exit_code,
@@ -782,7 +792,7 @@ def run_exec(msg, cancel_event=None):
         "cmd": cmd[:200],
         "stdout_head": stdout[:STDOUT_HEAD_LEN],
     }
-    append_history(HISTORY[rid])
+    append_history(HISTORY[hkey])
     lease_update_owned(binding_id, state="connected", child_pid=None,
                        child_pgid=None, task_id=None, cmd="", started_at=0,
                        last_progress=time.time(), cancel_requested=False)

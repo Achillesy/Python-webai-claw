@@ -44,7 +44,7 @@ native-host/uninstall.py        symmetric removal
    not written by the AI.
 2. `content.js` (via the site adapter) spots the block, parses the header,
    checks the exact `v:3` gate, the `host` UUID against this machine, and the
-   block-id dedup set. Missing/mismatched `host` is not executed.
+   `(session, id)` dedup set. Missing/mismatched `host` is not executed.
 3. `background.js` stamps `binding_id`, normalized `session`, and `ai`, then
    forwards the command and its target `host` to the native host.
 4. `host.py` validates the target `host`, binding, session, and AI context
@@ -115,7 +115,9 @@ Currently wired: `muse.ai`, `chat.deepseek.com`
 - The AI block carries the target machine UUID in `host`; the extension
   stamps the local binding/session/AI. The host rejects missing/mismatched
   `host`, `binding_id`, `session`, or `ai`.
-- Execution history gives idempotent dedup: a block id never executes twice.
+- Execution history gives idempotent dedup per conversation: the same
+  `(session, id)` never executes twice, while the same id in another chat
+  is independent.
 - Open: command allowlist / dangerous-command confirmation / audit log
   (see [`ROADMAP.md`](ROADMAP.md) — product-level decision, not settled).
 

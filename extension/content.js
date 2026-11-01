@@ -23,7 +23,7 @@ var MAX_RESULT = 6000;
 var MAX_CMD_BYTES = 512 * 1024; // per-block command cap: Chrome native messaging hard limit is 1MB per message; keep margin (host-side file chunks use 500KB likewise)
 var KEEP_HEAD = 2000;
 var KEEP_TAIL = 3500;
-var STORE_KEY = 'mh_processed_ids';
+var STORE_KEY = 'mh_processed_ids_v2';  // session-scoped keys: <session>|<id>
 var AUTO_KEY = 'mh_auto_send';
 var HOSTNAME_KEY = 'mh_local_hostname';
 var MACHINE_KEY = 'mh_machine_id';
@@ -381,13 +381,40 @@ function retryMachineIdentity(n) {
   }, waits[n]);
 }
 
-function markProcessed(id) {
-  processed[id] = true;
+function processedKey(id) {
+  return sessionKeyOf() + '|' + id;
+}
+
+function isProcessed(id) {
+  return !!processed[processedKey(id)];
+}
+
+function persistProcessed() {
   try {
     var obj = {};
     obj[STORE_KEY] = Object.keys(processed).slice(-300);
     chrome.storage.local.set(obj);
   } catch (e) {}
+}
+
+function markProcessed(id) {
+  processed[processedKey(id)] = true;
+  persistProcessed();
+}
+
+// Muse /thread/new adoption changes the session key for the same page.
+// Move already-processed ids to the new prefix so historical blocks stay dead.
+function rekeyProcessed(oldSession, newSession) {
+  if (!oldSession || !newSession || oldSession === newSession) return;
+  var prefix = oldSession + '|';
+  Object.keys(processed).forEach(function (k) {
+    if (k.indexOf(prefix) === 0) {
+      var id = k.slice(prefix.length);
+      delete processed[k];
+      processed[newSession + '|' + id] = true;
+    }
+  });
+  persistProcessed();
 }
 
 // ---------- long-lived connection to background ----------
@@ -973,7 +1000,7 @@ function scan() {
   if (!bound) {
     els.forEach(function (el) {
       var b = parseBlock(blockTextOf(el));
-      if (b && !processed[b.id] && !inFlight[b.id]) {
+      if (b && !isProcessed(b.id) && !inFlight[b.id]) {
         baselineIds[b.id] = true;
         markProcessed(b.id);
         console.log('[webai-claw] absorbed pre-binding block ' + b.id);
@@ -991,6 +1018,7 @@ function scan() {
       // /thread/<uuid> when the first message creates the thread. This is the
       // same page/binding, so adopt the real session instead of disconnecting.
       var oldSession = boundSession;
+      rekeyProcessed(oldSession, nowSession);
       boundSession = nowSession;
       try {
         getPort().postMessage({
@@ -1017,7 +1045,7 @@ function scan() {
   els.forEach(function (el) {
     var text = blockTextOf(el);
     var block = parseBlock(text);
-    if (!block || processed[block.id] || inFlight[block.id]) return;
+    if (!block || isProcessed(block.id) || inFlight[block.id]) return;
     if (inWarmup() || baselineIds[block.id] || isPlaceholderId(block.id)) {
       if (!baselineIds[block.id]) {
         baselineIds[block.id] = true;
@@ -1056,7 +1084,7 @@ function scan() {
     stableTimers[fp] = setTimeout(function () {
       delete stableTimers[fp];
       if (genAtSchedule !== gen) return;  // voided by a newer generation; don't forward
-      if (userAborted || processed[block.id] || inFlight[block.id]) return;
+      if (userAborted || isProcessed(block.id) || inFlight[block.id]) return;
       var again = parseBlock(blockTextOf(el));
       if (!again) return;
       var fireTarget = targetGate(again);

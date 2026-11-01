@@ -73,7 +73,7 @@ page" model and the 5-second cross-session rejection.
 
 **Decision.** Registry key = normalized source URL (`origin + path`).
 One auto-executing queue per URL; different URLs pump fairly into the serial
-host; same-URL duplicates are deduped by block id and dropped silently.
+host; same-URL duplicates are deduped by `(session, id)` and dropped silently.
 
 **Consequences.** No manual tab activation; no rejection noise. Queueing does
 *not* fix head-of-line blocking — that's what the timeout cap and `kill` are

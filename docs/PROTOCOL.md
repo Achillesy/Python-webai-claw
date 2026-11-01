@@ -29,7 +29,8 @@ Rules:
 - `v` MUST be the number `3` exactly. Missing or different → ignored.
 - **`host` is required** and must be the target machine UUID from the latest
   Connect attachment. Missing, `"*"`, or a mismatched UUID → not executed.
-- `id` is unique. The host dedups on it; the same id never runs twice.
+- `id` is unique within a conversation. Content and host dedup on
+  `(session, id)`; the same id in another conversation is a different command.
 - **Do not write `session` or `ai`.** The extension stamps them.
 - The command is the `cmd` field if present, else the remaining body text.
 - One command per block. Split dependent steps and wait for each result.
