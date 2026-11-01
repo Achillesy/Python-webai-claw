@@ -331,16 +331,22 @@ function loadProcessed(done) {
         console.log('[webai-claw] local machine_id (cached): ' + localMachineId);
       }
       if (res && res[PLATFORM_KEY]) localPlatform = res[PLATFORM_KEY];
+      // Always open the page port, even when the machine UUID is already
+      // cached. The background discovers supported tabs from this port's
+      // hello; without it the popup reports "not a supported AI chat".
+      try { getPort(); } catch (e) {
+        setTimeout(function () { try { getPort(); } catch (e2) {} }, 1000);
+      }
       if (!localMachineId) {
         // Cache the local UUID for the Connect attachment/display. getPort()
         // goes through background onConnect -> ensureNativePort -> ping -> pong.
-        try { getPort(); } catch (e) {}
         retryMachineIdentity(0);
       }
       ready = true;
       if (done) done();
     });
   } catch (e) {
+    try { getPort(); } catch (e2) {}
     ready = true;
     if (done) done();
   }
