@@ -110,8 +110,8 @@ Currently wired: `muse.ai`, `chat.deepseek.com`
 - The toolbar badge is global: blank when not connected, `✓` when connected,
   and `...` after a native-host command has run for 5 seconds. Errors are shown
   in the page/popup, not as a red badge.
-- OS notifications are limited to connected, disconnected, and waiting for the
-  user's next command; they show only the site hostname, never the session URL.
+- OS notifications are limited to disconnected and waiting for the user's
+  next command; they show only the site hostname, never the session URL.
 - `~/.webai-claw/` is intentionally **shared** between browsers on one machine.
   History is append-only JSONL; identity creation is atomic first-writer-wins;
   lease updates are lock-protected.

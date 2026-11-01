@@ -2,6 +2,17 @@
 
 All notable changes to webai-claw. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.1] - 2026-11-01
+
+### Changed
+- Removed the `Connected to <site>` system notification. Connect is always
+  initiated from the foreground popup, so the notification almost never fired
+  and could only appear in a rare tab-switch race. System notifications now
+  cover only unexpected disconnects and waiting for the user's next command.
+
+### Versions
+- Extension and host bumped to 1.0.1.
+
 ## [1.0.0] - 2026-11-01
 
 ### Changed

@@ -1,7 +1,7 @@
 // webai-claw extension service worker
 // Badge is a global state: blank (not connected), ✓ (connected), or ...
 // (native host has been running a command for 5s). Errors are not badges.
-// System notifications are limited to connected / disconnected / waiting for user.
+// System notifications are limited to disconnected / waiting for user.
 const MACHINE_KEY = "mh_machine_id";
 
 const HOST = "com.webai.claw";
@@ -116,12 +116,6 @@ function createNotification(kind, site, tabId, message, force) {
       priority: 2
     }, function () {});
   } catch (e) {}
-}
-
-function notifyConnectedIfBackground(site, tabId) {
-  isTabActive(tabId).then((active) => {
-    if (!active) createNotification("connected", site, tabId, "Connected to " + site);
-  });
 }
 
 function notifyDisconnected(site, tabId) {
@@ -716,7 +710,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         activeBinding = { binding_id: info.binding_id, session: info.session,
                           ai: info.ai, port: found.port, tabId: tab.id };
         updateBadge();
-        notifyConnectedIfBackground(siteOfInfo(info), tab.id);
         try {
           found.port.postMessage({ type: "bound", bound: true,
             session: info.session, ai: info.ai });
