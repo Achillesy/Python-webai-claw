@@ -7,8 +7,12 @@ def run(msg, history):
     items = sorted(history.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)[:30]
     lines = ["# webai-claw session summary", "", "generated: " + time.strftime("%Y-%m-%d %H:%M:%S")]
     for k, v in items:
-        out = (v.get("stdout_head") or v.get("stdout") or "").strip().replace(chr(10), " ")[:80]
-        lines.append("- %s  %s  %s" % (v.get("id") or k, "ok" if v.get("ok") else "fail", out))
+        lines.append("- %s  %s  exit=%s  %sms  cmd_len=%s" % (
+            v.get("id") or k,
+            "ok" if v.get("ok") else "fail",
+            v.get("exit_code"),
+            v.get("duration_ms", 0),
+            v.get("cmd_len", 0)))
     d = os.path.join(os.path.expanduser("~"), ".webai-claw")
     os.makedirs(d, exist_ok=True)
     sp = os.path.join(d, "session-summary.md")

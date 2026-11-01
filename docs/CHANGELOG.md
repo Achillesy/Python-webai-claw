@@ -2,6 +2,29 @@
 
 All notable changes to webai-claw. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.1] - 2026-11-01
+
+### Fixed
+- Content always opens its background port, even when the machine UUID is
+  cached, so the popup recognizes DeepSeek/Muse tabs and Connect is enabled.
+- DeepSeek new chats (bare origin or `/a/chat`) adopt the first real
+  `/a/chat/s/<uuid>` session for the same binding instead of releasing the lease.
+- Command dedup is scoped by `(session, id)` in both content storage and host
+  history, so reusing an id in another chat no longer silently skips a command.
+
+### Privacy
+- `exec_history.jsonl` stores metadata only: id, session fingerprint, AI type,
+  exit code, duration, timestamp, and command/output lengths. Command text and
+  output text are no longer persisted; old records are scrubbed on host startup.
+- `host.log` records `session_key` and `cmd_len`, not the full session URL or
+  command text. Connect/busy/disconnect events are logged for diagnostics.
+- `ctx_summary.py` emits metadata-only summaries.
+- AI-AGENT.md documents that `exec` output still reaches the chat and that
+  `attach` is preferred for sensitive or large files.
+
+### Changed
+- Extension and host versions bumped to 0.2.1; the popup shows both versions.
+
 ## [0.2.0] - 2026-10-31
 
 ### Changed

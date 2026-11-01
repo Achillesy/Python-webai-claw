@@ -107,6 +107,10 @@ Currently wired: `muse.ai`, `chat.deepseek.com`
 - `~/.webai-claw/` is intentionally **shared** between browsers on one machine.
   History is append-only JSONL; identity creation is atomic first-writer-wins;
   lease updates are lock-protected.
+- Persistence is privacy-minimized: `exec_history.jsonl` keeps only id,
+  session fingerprint, AI type, exit code, duration, timestamp, and
+  command/output lengths; `host.log` keeps `session_key`/`cmd_len`, not raw
+  session URLs or command text. Command output still returns to the chat.
 
 ## 7. Trust model
 

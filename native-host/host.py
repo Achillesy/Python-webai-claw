@@ -16,9 +16,11 @@
 # it is installed from.
 
 import base64
+import hashlib
 import json
 import mimetypes
 import os
+import re
 import signal
 import socket
 import struct
@@ -30,7 +32,7 @@ import uuid
 import ctx_summary
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "0.2.0"
+HOST_VERSION = "0.2.1"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
@@ -51,12 +53,10 @@ HISTORY_LOCK = os.path.join(LOG_DIR, "exec_history.lock")
 HISTORY_LIMIT = 500  # keep the most recent 500 (session,id) execution records
 HISTORY_MAX_BYTES = 1 * 1024 * 1024  # compact when the JSONL file grows past 1MB
 HISTORY_LOCK_STALE = 10  # seconds; a crashed holder's lock file is removable after this
-STDOUT_HEAD_LEN = 500  # keep only the first 500 chars of output per entry (ctx_summary uses the first 80)
-# Slimming note (2026-10-04): HISTORY is a key table for idempotent
-# dedup, not an audit archive. Storing full stdout once bloated it to
-# 22MB; now only metadata + output summary are kept. Full output is
-# already filled back into the page — the page is the record. UUIDs are
-# not stored (the log lives on this machine, so the machine is implied).
+# Privacy note (2026-11-01): HISTORY is a key table for idempotent dedup,
+# not an audit archive. It stores metadata only: id, session fingerprint,
+# AI type, exit code, duration, timestamp, and lengths. Command text and
+# output text are never persisted; full output is filled back into the page.
 MAX_FILE_SIZE = 25 * 1024 * 1024  # single-file cap 25MB
 MAX_CMD_BYTES = 512 * 1024  # single-command cap 512KB (Chrome native message hard limit is 1MB; keep margin; matches the extension side)
 CHUNK_B64 = 500 * 1024  # base64 chars per chunk (raw ~375KB; keep margin under the 1MB message limit)
@@ -85,27 +85,49 @@ def log(line):
         pass
 
 
+def _session_key(session):
+    """One-way session fingerprint for persisted logs/history (never the URL)."""
+    s = str(session or "")
+    if not s:
+        return ""
+    return hashlib.sha256(s.encode("utf-8", "ignore")).hexdigest()[:16]
+
+
+def _byte_len(v):
+    try:
+        return len(str(v or "").encode("utf-8", "ignore"))
+    except Exception:
+        return 0
+
+
 def slim_entry(key, v):
-    """Slim one history entry down to metadata + output summary (all idempotent dedup needs)."""
+    """History is metadata only: no command text and no output text."""
     v = v if isinstance(v, dict) else {}
+    cmd_len = v.get("cmd_len")
+    if cmd_len is None:
+        cmd_len = _byte_len(v.get("cmd"))
+    stdout_len = v.get("stdout_len")
+    if stdout_len is None:
+        stdout_len = _byte_len(v.get("stdout_head") or v.get("stdout"))
     return {
         "id": v.get("id", key),
         "ok": v.get("ok"),
         "exit_code": v.get("exit_code"),
         "duration_ms": v.get("duration_ms", 0),
         "ts": v.get("ts", 0),
-        "session": v.get("session", ""),
+        "session_key": v.get("session_key") or _session_key(v.get("session") or ""),
         "ai": v.get("ai", ""),
-        "cmd": str(v.get("cmd", ""))[:200],
-        # tolerate the old full-stdout field; take the first 500 chars
-        "stdout_head": str(v.get("stdout_head") or v.get("stdout") or "")[:STDOUT_HEAD_LEN],
+        "cmd_len": int(cmd_len or 0),
+        "stdout_len": int(stdout_len or 0),
+        "stderr_len": int(v.get("stderr_len") or 0),
     }
 
 
 def _history_key(v):
-    """Dedup key: session + id. The same id in a different chat is a different command."""
+    """Dedup key: session fingerprint + id (never the raw session URL)."""
     v = v if isinstance(v, dict) else {}
-    return "%s|%s" % (v.get("session") or "", v.get("id") or "")
+    sess = v.get("session_key") or _session_key(v.get("session") or "")
+    return "%s|%s" % (sess, v.get("id") or "")
 
 
 def _iter_history(path):
@@ -201,6 +223,72 @@ def refresh_history():
     global HISTORY
     HISTORY = load_history()
     return HISTORY
+
+
+def scrub_history_privacy():
+    """Rewrite old history records to metadata only (one-way privacy migration)."""
+    if not os.path.exists(HISTORY_PATH):
+        return
+    raw = list(_iter_history(HISTORY_PATH))
+    if not raw:
+        return
+    needs = any(("cmd" in obj or "stdout_head" in obj or "stdout" in obj or
+                 "session" in obj) for obj in raw)
+    if not needs:
+        return
+    lock_fd = _acquire_lock(HISTORY_LOCK, 5.0)
+    if lock_fd is None:
+        return
+    tmp = HISTORY_PATH + ".privacy.%d" % os.getpid()
+    try:
+        hist = load_history()
+        with open(tmp, "w", encoding="utf-8") as f:
+            for v in sorted(hist.values(), key=lambda x: x.get("ts", 0)):
+                f.write(json.dumps(v, ensure_ascii=False,
+                                   separators=(",", ":")) + "\n")
+        os.replace(tmp, HISTORY_PATH)
+        log("history privacy scrub: command/output/session text removed")
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    finally:
+        _release_lock(lock_fd, HISTORY_LOCK)
+
+
+def scrub_log_privacy():
+    """Redact old host.log lines that predate the privacy changes."""
+    if not os.path.exists(LOG_PATH):
+        return
+    try:
+        with LOG_LOCK:
+            lines = open(LOG_PATH, encoding='utf-8', errors='replace').readlines()
+            changed = False
+            out = []
+            for line in lines:
+                newline = line
+                # cmd=%r is last on our exec lines; drop the whole tail.
+                if 'cmd=' in newline:
+                    newline = re.sub(r"cmd=.*$", "cmd=<redacted>", newline)
+                    if newline != line:
+                        changed = True
+                # session=https://... -> session_key=<one-way fingerprint>
+                if 'session=' in newline:
+                    def repl(m):
+                        return 'session_key=' + (_session_key(m.group(1)) or '-')
+                    newline2 = re.sub(r"session=(https?://\S+)", repl, newline)
+                    if newline2 != newline:
+                        newline = newline2
+                        changed = True
+                out.append(newline)
+            if changed:
+                tmp = LOG_PATH + ".privacy.%d" % os.getpid()
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    f.writelines(out)
+                os.replace(tmp, LOG_PATH)
+    except OSError:
+        pass
 
 
 def _compact_history_locked():
@@ -626,10 +714,11 @@ def run_exec(msg, cancel_event=None):
     # Two host processes (Chrome/Edge) share the home dir: re-read before
     # dedup so a just-finished command in the other browser is visible.
     refresh_history()
-    hkey = _history_key({"id": rid, "session": msg.get("session") or ""})
+    session = msg.get("session") or ""
+    hkey = _history_key({"id": rid, "session_key": _session_key(session)})
     if hkey in HISTORY:
-        log("duplicate id=%s session=%s, returning cached" %
-            (rid, msg.get("session") or ""))
+        log("duplicate id=%s session_key=%s, returning cached" %
+            (rid, _session_key(session)))
         h = HISTORY[hkey]
         # dedup hit: honestly report "this is cached"; output is summary only (full output was filled back into the page at the time)
         return {
@@ -637,11 +726,11 @@ def run_exec(msg, cancel_event=None):
             "id": rid,
             "hostname": socket.gethostname(),
             "machine_id": MACHINE_ID,
-            "session": h.get("session", ""),
-            "ai": h.get("ai", ""),
+            "session": session,
+            "ai": msg.get("ai") or h.get("ai", ""),
             "ok": h.get("ok"),
             "exit_code": h.get("exit_code"),
-            "stdout": (h.get("stdout_head") or "") + "\n…(dedup hit: this id was already executed; only the output summary is kept)",
+            "stdout": "…(dedup hit: this id was already executed; output is not retained for privacy)",
             "stderr": "",
             "duration_ms": h.get("duration_ms", 0),
             "duplicate": True,
@@ -759,8 +848,9 @@ def run_exec(msg, cancel_event=None):
     stdout = decode_output(box.get("out"))
     stderr = decode_output(box.get("err"))
     duration_ms = int((time.time() - started) * 1000)
-    log("exec id=%s session=%s exit=%s ms=%s cmd=%r" % (
-        msg.get("id"), msg.get("session") or "-", exit_code, duration_ms, cmd[:200]))
+    log("exec id=%s session_key=%s exit=%s ms=%s cmd_len=%d" % (
+        msg.get("id"), _session_key(session) or "-", exit_code, duration_ms,
+        _byte_len(cmd)))
     res = {
         "type": "result",
         "id": msg.get("id"),
@@ -787,10 +877,11 @@ def run_exec(msg, cancel_event=None):
         "exit_code": exit_code,
         "duration_ms": duration_ms,
         "ts": res["ts"],
-        "session": msg.get("session") or "",
+        "session_key": _session_key(session),
         "ai": msg.get("ai") or "",
-        "cmd": cmd[:200],
-        "stdout_head": stdout[:STDOUT_HEAD_LEN],
+        "cmd_len": _byte_len(cmd),
+        "stdout_len": _byte_len(stdout),
+        "stderr_len": _byte_len(stderr),
     }
     append_history(HISTORY[hkey])
     lease_update_owned(binding_id, state="connected", child_pid=None,
@@ -962,8 +1053,9 @@ def run_diag(msg):
             with open(LOG_PATH, encoding="utf-8", errors="replace") as f:
                 tail = f.readlines()[-20:]
         recent = sorted(HISTORY.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)[:10]
-        recent_list = [{"id": k, "ok": v.get("ok"), "ts": v.get("ts"),
-                        "session": v.get("session", "")} for k, v in recent]
+        recent_list = [{"id": v.get("id", k), "ok": v.get("ok"),
+                        "ts": v.get("ts"), "session_key": v.get("session_key", "")}
+                       for k, v in recent]
         return {
             "type": "result",
             "id": msg.get("id"),
@@ -1058,8 +1150,9 @@ def handle_connect(msg):
                            msg.get("extension_id") or "")
     if result.get("ok"):
         LEASE_BINDING = binding
-        log("connect binding=%s session=%s ai=%s%s%s" % (
-            binding, msg.get("session") or "", msg.get("ai") or "",
+        log("connect binding=%s session_key=%s ai=%s%s%s" % (
+            binding, _session_key(msg.get("session") or "") or "-",
+            msg.get("ai") or "",
             " refreshed" if result.get("refreshed") else "",
             " took_over_stale" if result.get("took_over_stale") else ""))
         return {
@@ -1076,9 +1169,9 @@ def handle_connect(msg):
             "took_over_stale": bool(result.get("took_over_stale")),
         }
     owner = result.get("owner") or {}
-    log("connect busy binding=%s session=%s owner_binding=%s state=%s" % (
-        binding, msg.get("session") or "", owner.get("binding_id") or "",
-        result.get("state") or ""))
+    log("connect busy binding=%s session_key=%s owner_binding=%s state=%s" % (
+        binding, _session_key(msg.get("session") or "") or "-",
+        owner.get("binding_id") or "", result.get("state") or ""))
     return {"type": "busy", "id": msg.get("id"), **result}
 
 
@@ -1232,6 +1325,8 @@ def main():
         sys.stderr.write("webai-claw: machine identity missing; run native-host/install.py\n")
         return 3
     HISTORY = load_history()
+    scrub_history_privacy()
+    scrub_log_privacy()
     BROWSER_ALIVE = True
     for sig in (signal.SIGTERM, signal.SIGINT, getattr(signal, "SIGHUP", None)):
         if sig is not None:
