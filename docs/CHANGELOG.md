@@ -2,6 +2,28 @@
 
 All notable changes to webai-claw. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.0] - 2026-11-01
+
+### Changed
+- Badge is now a single global state: blank when not connected, `✓` when
+  connected, and `...` when the native host has been running a command for
+  5 seconds. Red error badges and the per-tab unsupported state are removed.
+- The popup separates `Auto-send command results` (default on) from
+  `Auto-send attachments` (default off).
+- Attachment auto-send is controlled only by the popup. The AI-side `send`
+  field is removed and ignored for compatibility.
+- Added OS notifications for: connected to a site, disconnected from a site,
+  and waiting for the user's next command. Notifications show only the site
+  hostname, never the session URL.
+
+### Fixed
+- Successful file reads no longer leave a stale red badge.
+- Long-running host commands now show a consistent waiting badge.
+- Attachments no longer have two competing auto-send switches.
+
+### Versions
+- Extension and host bumped to 1.0.0.
+
 ## [0.2.2] - 2026-11-01
 
 ### Fixed

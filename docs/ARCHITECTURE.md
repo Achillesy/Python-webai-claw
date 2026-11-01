@@ -104,6 +104,14 @@ Currently wired: `muse.ai`, `chat.deepseek.com`
   (`killpg` on POSIX, `taskkill /T /F` on Windows).
 - Timeouts: default 120s, autonomous max 1200s, explicitly approved max 7200s.
 - After 10 consecutive auto-sends the page pauses and asks Continue/Stop.
+- `Auto-send command results` defaults on; `Auto-send attachments` defaults off.
+  Attachments are sent only when the user enables that popup option. The AI-side
+  `send` field is ignored.
+- The toolbar badge is global: blank when not connected, `✓` when connected,
+  and `...` after a native-host command has run for 5 seconds. Errors are shown
+  in the page/popup, not as a red badge.
+- OS notifications are limited to connected, disconnected, and waiting for the
+  user's next command; they show only the site hostname, never the session URL.
 - `~/.webai-claw/` is intentionally **shared** between browsers on one machine.
   History is append-only JSONL; identity creation is atomic first-writer-wins;
   lease updates are lock-protected.

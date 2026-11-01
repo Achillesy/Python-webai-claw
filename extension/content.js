@@ -25,6 +25,7 @@ var KEEP_HEAD = 2000;
 var KEEP_TAIL = 3500;
 var STORE_KEY = 'mh_processed_ids_v2';  // session-scoped keys: <session>|<id>
 var AUTO_KEY = 'mh_auto_send';
+var ATTACH_AUTO_KEY = 'mh_auto_send_attachments';
 var HOSTNAME_KEY = 'mh_local_hostname';
 var MACHINE_KEY = 'mh_machine_id';
 var PLATFORM_KEY = 'mh_platform';
@@ -116,6 +117,16 @@ function resetAutoSendState() {
   autoSentCount = 0;
   lastAutoSendAt = 0;
   autoSendTimes = [];
+}
+
+function notifyWaiting(reason) {
+  if (!bound) return;
+  try {
+    getPort().postMessage({
+      type: 'waiting', reason: reason || 'next-command',
+      binding_id: BINDING_ID, gen: gen
+    });
+  } catch (e) {}
 }
 
 function normalizeSession(v) {
@@ -325,7 +336,6 @@ function parseBlock(text) {
     sel: (typeof head.sel === 'string') ? head.sel : null,
     path: (typeof head.path === 'string') ? head.path : null,
     text: (typeof head.text === 'string') ? head.text : null,
-    send: !!head.send,
     cmd: cmdFromHead !== null ? cmdFromHead : cmdFromBody
   };
 }
@@ -681,7 +691,7 @@ function attachBlock(block) {
   }
   inFlight[block.id] = true;
   cmdById[block.id] = 'attach: ' + block.path;
-  attachMeta[block.id] = { text: block.text || null, send: !!block.send };
+  attachMeta[block.id] = { text: block.text || null };
   console.log('[webai-claw] attach ' + block.id + ' requesting file ' + block.path);
   try {
     getPort().postMessage({ type: 'read_file', id: block.id, path: block.path,
@@ -722,13 +732,13 @@ function onFileArrived(msg) {
     if (meta.text) {
       try { adapter.fillResult(meta.text); } catch (e) {}
     }
-    if (meta.send) {
-      sendWithRetry({
-        tag: 'attach', maxWaitMs: 45000, intervalMs: 500,
-        respectAuto: true, respectPause: true, countAuto: true,
-        failNote: '\n[webai-claw] attachment is ready but auto-send failed; press Send manually.'
-      });
-    }
+    sendWithRetry({
+      tag: 'attach', maxWaitMs: 45000, intervalMs: 500,
+      autoKey: ATTACH_AUTO_KEY, autoDefault: false,
+      respectAuto: true, respectPause: true, countAuto: true,
+      onSkip: function () { notifyWaiting('attachment-ready'); },
+      failNote: '\n[webai-claw] attachment is ready but auto-send failed; press Send manually.'
+    });
   }, function (e) {
     fillBack('[claw:attach] id=' + msg.id + ' error=adapter upload threw: ' + (e && e.message || e));
   });
@@ -804,6 +814,7 @@ function sendConnectAttachment(config) {
     sendWithRetry({
       tag: 'connect', maxWaitMs: 25000, intervalMs: 500,
       respectAuto: true, respectPause: false, countAuto: false,
+      onSkip: function () { notifyWaiting('connect-ready'); },
       failNote: '\n[webai-claw] Connect note is ready but auto-send failed; press Send manually.'
     });
   }, function (e) {
@@ -981,7 +992,8 @@ function maybeAutoSend() {
     intervalMs: 400,
     respectAuto: true,
     respectPause: true,
-    countAuto: true
+    countAuto: true,
+    onSkip: function () { notifyWaiting('result-ready'); }
   });
 }
 
@@ -999,6 +1011,7 @@ function pauseAutoSend(kind) {
   if (paused) return;
   paused = true;
   setPauseStorage(true);
+  notifyWaiting('paused');
   var note;
   if (kind === 'rate') {
     note = '[claw:paused] 自动发送过于频繁（' + MAX_AUTO_SENDS_PER_MINUTE +
@@ -1030,11 +1043,20 @@ function sendWithRetry(opts) {
   var respectAuto = opts.respectAuto !== false;
   var respectPause = opts.respectPause !== false;
   var countAuto = opts.countAuto !== false;
+  var autoKey = opts.autoKey || AUTO_KEY;
+  var autoDefault = opts.autoDefault !== false;
+
+  function skip(reason) {
+    console.log('[webai-claw] ' + tag + ': ' + reason + '; staying fill-only');
+    if (opts.onSkip) {
+      try { opts.onSkip(reason); } catch (e) {}
+    }
+  }
 
   function begin() {
     if (contextDead) return;
     if (respectPause && paused) {
-      console.log('[webai-claw] ' + tag + ': paused; staying fill-only');
+      skip('paused');
       return;
     }
     if (countAuto) {
@@ -1054,7 +1076,7 @@ function sendWithRetry(opts) {
     (function attempt() {
       if (contextDead) return;
       if (respectPause && paused) {
-        console.log('[webai-claw] ' + tag + ': paused; staying fill-only');
+        skip('paused');
         return;
       }
       var busy = false;
@@ -1084,19 +1106,24 @@ function sendWithRetry(opts) {
       if (opts.failNote) {
         try { adapter.fillResult(opts.failNote); } catch (e) {}
       }
+      skip('send-failed');
     })();
   }
 
   if (respectAuto) {
     try {
-      chrome.storage.local.get([AUTO_KEY], function (res) {
-        if (res && res[AUTO_KEY] === false) {
-          console.log('[webai-claw] ' + tag + ': auto-send disabled; staying fill-only');
+      chrome.storage.local.get([autoKey], function (res) {
+        var enabled = (res && res[autoKey] !== undefined) ? !!res[autoKey] : autoDefault;
+        if (!enabled) {
+          skip('auto-send-off');
           return;
         }
         begin();
       });
-    } catch (e) { begin(); }
+    } catch (e) {
+      if (autoDefault) begin();
+      else skip('auto-send-error');
+    }
   } else {
     begin();
   }

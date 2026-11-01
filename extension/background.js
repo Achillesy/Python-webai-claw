@@ -1,10 +1,7 @@
 // webai-claw extension service worker
-// M1: click icon → ping local host → pong returns, badge flips to ✓ (bridge acceptance).
-// M2: content script delivers exec via long-lived Port → forwarded to host via Native Messaging →
-//     host's result / progress return to the content script the same way. Icon badge = status:
-//     … running, ✓ ready/done, ✕ disconnected.
-// M4: machine_id (UUID) from pong is cached into chrome.storage.local,
-//     for the content script to read for strict-addressing routing. hostname kept only as a human-readable label.
+// Badge is a global state: blank (not connected), ✓ (connected), or ...
+// (native host has been running a command for 5s). Errors are not badges.
+// System notifications are limited to connected / disconnected / waiting for user.
 const MACHINE_KEY = "mh_machine_id";
 
 const HOST = "com.webai.claw";
@@ -20,6 +17,10 @@ const pageInfo = new Map();        // pagePort -> {binding_id, session, ai, url,
 const hostRequests = new Map();    // one-shot host request id -> {cb, timer}
 let activeBinding = null;          // {binding_id, session, ai, port, tabId} for this browser
 const hostInfo = { machine_id: null, hostname: null, platform: null, shell: null, host_version: null };
+const LONG_TASK_BADGE_MS = 5000;
+let badgeTimer = null;
+const notificationTabs = new Map();
+const notificationCooldowns = new Map();
 
 function browserName() {
   try { return (navigator.userAgent || "").indexOf("Edg/") !== -1 ? "edge" : "chrome"; }
@@ -44,6 +45,94 @@ const schedQueue = [];      // [{port, kind, msg, session, gen, graceTimer}]
 let hostBusy = false;
 let running = null;         // {id, port, session, gen, cmd, startTime}
 const GRACE_MS = 5000;
+
+function clearBadgeTimer() {
+  if (badgeTimer) {
+    clearTimeout(badgeTimer);
+    badgeTimer = null;
+  }
+}
+
+function setActionTitle(title) {
+  try { chrome.action.setTitle({ title }); } catch (e) {}
+}
+
+function updateBadge() {
+  clearBadgeTimer();
+  if (!activeBinding) {
+    try { chrome.action.setBadgeText({ text: "" }); } catch (e) {}
+    setActionTitle("webai-claw: not connected");
+    return;
+  }
+  if (running) {
+    const elapsed = Date.now() - (running.startTime || 0);
+    if (elapsed >= LONG_TASK_BADGE_MS) {
+      try { chrome.action.setBadgeText({ text: "..." }); } catch (e) {}
+      try { chrome.action.setBadgeBackgroundColor({ color: "#b26a00" }); } catch (e) {}
+      setActionTitle("webai-claw: waiting for native host");
+      return;
+    }
+    badgeTimer = setTimeout(updateBadge, Math.max(0, LONG_TASK_BADGE_MS - elapsed));
+  }
+  try { chrome.action.setBadgeText({ text: "✓" }); } catch (e) {}
+  try { chrome.action.setBadgeBackgroundColor({ color: "#2e7d32" }); } catch (e) {}
+  setActionTitle(running ? "webai-claw: connected (command running)" : "webai-claw: connected");
+}
+
+function siteOfUrl(url) {
+  try { return new URL(url).hostname || "AI chat"; }
+  catch (e) { return "AI chat"; }
+}
+
+function siteOfInfo(info) {
+  return siteOfUrl((info && info.url) || "");
+}
+
+function isTabActive(tabId) {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+        resolve(!!(tabs && tabs[0] && tabs[0].id === tabId));
+      });
+    } catch (e) { resolve(false); }
+  });
+}
+
+function createNotification(kind, site, tabId, message, force) {
+  if (!chrome.notifications || !chrome.notifications.create) return;
+  const key = kind + "|" + tabId + "|" + site;
+  const now = Date.now();
+  const cooldown = kind === "disconnected" ? 5000 : 10000;
+  if (!force && now - (notificationCooldowns.get(key) || 0) < cooldown) return;
+  notificationCooldowns.set(key, now);
+  const id = "wc-" + kind + "-" + now + "-" + Math.random().toString(36).slice(2, 7);
+  notificationTabs.set(id, tabId);
+  try {
+    chrome.notifications.create(id, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+      title: "webai-claw",
+      message: message,
+      priority: 2
+    }, function () {});
+  } catch (e) {}
+}
+
+function notifyConnectedIfBackground(site, tabId) {
+  isTabActive(tabId).then((active) => {
+    if (!active) createNotification("connected", site, tabId, "Connected to " + site);
+  });
+}
+
+function notifyDisconnected(site, tabId) {
+  createNotification("disconnected", site, tabId, "Disconnected from " + site);
+}
+
+function notifyWaitingIfBackground(site, tabId) {
+  isTabActive(tabId).then((active) => {
+    if (!active) createNotification("waiting", site, tabId, "Waiting for your next command");
+  });
+}
 
 function curGenOf(port) {
   const g = portGen.get(port);
@@ -81,7 +170,7 @@ function forwardToHost(item) {
               cmd: desc, startTime: Date.now() };
   pending.set(item.msg.id, { port: item.port, session: item.session,
                              ai: item.ai, binding_id: item.binding_id, gen: item.gen });
-  setBadge("…", "#616161");
+  updateBadge();
   try {
     if (item.kind === "exec") {
       ensureNativePort().postMessage({
@@ -126,7 +215,7 @@ function forwardToHost(item) {
       item.port.postMessage({ type: "error", id: item.msg.id, gen: item.gen,
         error: "failed to send to local host: " + e.message });
     } catch (err) {}
-    setBadge("✕", "#c62828");
+    updateBadge();
     pump();
   }
 }
@@ -178,11 +267,6 @@ function dropQueueForBinding(port, bindingId, reason) {
   }
 }
 
-function setBadge(text, color) {
-  chrome.action.setBadgeText({ text });
-  if (color) chrome.action.setBadgeBackgroundColor({ color });
-}
-
 function requestHost(msg, cb, timeoutMs) {
   const id = msg.id || ("h-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8));
   msg.id = id;
@@ -217,7 +301,7 @@ function ensureNativePort() {
       return;
     }
     if (msg.type === "pong") {
-      setBadge("✓", "#2e7d32");
+      updateBadge();
       if (msg.machine_id) hostInfo.machine_id = msg.machine_id;
       if (msg.hostname) hostInfo.hostname = msg.hostname;
       if (msg.platform) hostInfo.platform = msg.platform;
@@ -252,7 +336,7 @@ function ensureNativePort() {
       if (!buf) {
         buf = { name: msg.name, mime: msg.mime, size: msg.size,
                 total: msg.total, chunks: [] };
-        fileBuf.set(msg.id, buf); if (fileBufTimer) clearTimeout(fileBufTimer); fileBufTimer = setTimeout(function(){ for (var fid of fileBuf.keys()) { var e3 = pending.get(fid); if (e3 && e3.port) { try { e3.port.postMessage({type:"error",id:fid,gen:e3.gen,error:"file timeout 30s"}); } catch (ee) {} } pending.delete(fid); if (running && running.id === fid) { hostBusy = false; running = null; } } fileBuf.clear(); setBadge("X","#c62828"); pump(); }, 30000);
+        fileBuf.set(msg.id, buf); if (fileBufTimer) clearTimeout(fileBufTimer); fileBufTimer = setTimeout(function(){ for (var fid of fileBuf.keys()) { var e3 = pending.get(fid); if (e3 && e3.port) { try { e3.port.postMessage({type:"error",id:fid,gen:e3.gen,error:"file timeout 30s"}); } catch (ee) {} } pending.delete(fid); if (running && running.id === fid) { hostBusy = false; running = null; } } fileBuf.clear(); updateBadge(); pump(); }, 30000);
       }
       buf.chunks[msg.index] = msg.data;
       var got = 0;
@@ -263,6 +347,7 @@ function ensureNativePort() {
         fileBuf.delete(msg.id);
         pending.delete(msg.id);
         if (running && running.id === msg.id) { hostBusy = false; running = null; }
+        updateBadge();
         if (pg && entry.gen === curGenOf(pg)) {
           try {
             pg.postMessage({ type: "file", id: msg.id, gen: entry.gen, name: buf.name,
@@ -300,17 +385,17 @@ function ensureNativePort() {
                       " gen=" + entry.gen + " current=" + curGenOf(page));
         }
       }
-      if (msg.type === "result") setBadge("✓", "#2e7d32");
-      if (msg.type === "error") setBadge("✕", "#c62828");
+      updateBadge();
       if (msg.type !== "progress") pump();
     }
   });
   nativePort.onDisconnect.addListener(() => {
     console.log("[webai-claw] native port disconnected:", chrome.runtime.lastError);
+    const old = activeBinding;
+    const oldSite = old ? siteOfUrl((pageInfo.get(old.port) || {}).url || old.session) : "";
     nativePort = null;
     hostBusy = false;
     running = null;
-    setBadge("✕", "#c62828");
     for (const [id, entry] of pending) {
       try {
         entry.port.postMessage({ type: "error", id, gen: entry.gen,
@@ -325,6 +410,8 @@ function ensureNativePort() {
     }
     hostRequests.clear();
     activeBinding = null;
+    updateBadge();
+    if (old) notifyDisconnected(oldSite, old.tabId);
     for (const p of pagePorts) {
       try { p.postMessage({ type: "bound", bound: false }); } catch (e) {}
     }
@@ -352,12 +439,12 @@ function ensureNativePort() {
 }
 
 chrome.action.onClicked.addListener(() => {
-  setBadge("…", "#616161");
+  updateBadge();
   try {
     ensureNativePort().postMessage({ type: "ping", id: "m1-" + Date.now() });
   } catch (e) {
     console.error("[webai-claw] connectNative failed:", e);
-    setBadge("✕", "#c62828");
+    updateBadge();
   }
 });
 
@@ -405,6 +492,7 @@ chrome.runtime.onConnect.addListener((pagePort) => {
         }, (res) => {
           if (!res || res.type !== "connected") {
             activeBinding = null;
+            updateBadge();
             try { pagePort.postMessage({ type: "bound", bound: false }); } catch (e) {}
           }
         }, 10000);
@@ -421,9 +509,17 @@ chrome.runtime.onConnect.addListener((pagePort) => {
       if (activeBinding && activeBinding.port === pagePort) {
         const old = activeBinding;
         activeBinding = null;
+        updateBadge();
         dropQueueForBinding(old.port, old.binding_id, "session changed; queued command discarded");
         requestHost({ type: "disconnect", binding_id: old.binding_id }, () => {});
         try { pagePort.postMessage({ type: "bound", bound: false }); } catch (e) {}
+      }
+      return;
+    }
+    if (msg.type === "waiting") {
+      const info = pageInfo.get(pagePort) || {};
+      if (activeBinding && activeBinding.port === pagePort) {
+        notifyWaitingIfBackground(siteOfInfo(info), activeBinding.tabId);
       }
       return;
     }
@@ -461,6 +557,7 @@ chrome.runtime.onConnect.addListener((pagePort) => {
     if (activeBinding && activeBinding.port === pagePort) {
       const old = activeBinding;
       activeBinding = null;
+      updateBadge();
       requestHost({ type: "disconnect", binding_id: old.binding_id }, () => {});
     }
     pagePorts.delete(pagePort);
@@ -553,6 +650,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             activeBinding.ai = lease.owner.ai || activeBinding.ai;
           }
         }
+        updateBadge();
         sendResponse({
           ok: !!(st && !st.error),
           error: st && st.error,
@@ -617,6 +715,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         activeBinding = { binding_id: info.binding_id, session: info.session,
                           ai: info.ai, port: found.port, tabId: tab.id };
+        updateBadge();
+        notifyConnectedIfBackground(siteOfInfo(info), tab.id);
         try {
           found.port.postMessage({ type: "bound", bound: true,
             session: info.session, ai: info.ai });
@@ -649,6 +749,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     const old = activeBinding;
     activeBinding = null;
+    updateBadge();
     dropQueueForBinding(old.port, old.binding_id, "disconnected; queued command discarded");
     // Unbind the page immediately; do not wait for the host round-trip.
     try { old.port.postMessage({ type: "bound", bound: false }); } catch (e) {}
@@ -699,6 +800,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   return false;
 });
+
+// ---------- System notifications ----------
+if (chrome.notifications) {
+  if (chrome.notifications.onClicked) {
+    chrome.notifications.onClicked.addListener(function (id) {
+      const tabId = notificationTabs.get(id);
+      notificationTabs.delete(id);
+      if (tabId !== null && tabId !== undefined) {
+        try { chrome.tabs.update(tabId, { active: true }); } catch (e) {}
+      }
+      try { chrome.notifications.clear(id); } catch (e) {}
+    });
+  }
+  if (chrome.notifications.onClosed) {
+    chrome.notifications.onClosed.addListener(function (id) {
+      notificationTabs.delete(id);
+    });
+  }
+}
 
 // ---------- Onboarding: open setup page after install ----------
 // The extension is useless without the local host; the setup page stays

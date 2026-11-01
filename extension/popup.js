@@ -16,6 +16,7 @@ var els = {
   cont: document.getElementById('continue'),
   stop: document.getElementById('stop'),
   auto: document.getElementById('autosend'),
+  attachAuto: document.getElementById('attachauto'),
   mid: document.getElementById('mid'),
   copymid: document.getElementById('copymid'),
   ping: document.getElementById('ping')
@@ -38,14 +39,18 @@ function send(type, payload, cb) {
   }
 }
 
-chrome.storage.local.get(['mh_auto_send', 'mh_paused'], function (res) {
+chrome.storage.local.get(['mh_auto_send', 'mh_auto_send_attachments', 'mh_paused'], function (res) {
   els.auto.checked = !(res && res.mh_auto_send === false);
+  els.attachAuto.checked = !!(res && res.mh_auto_send_attachments === true);
   paused = !!(res && res.mh_paused);
   refresh();
 });
 
 els.auto.addEventListener('change', function () {
   chrome.storage.local.set({ mh_auto_send: els.auto.checked });
+});
+els.attachAuto.addEventListener('change', function () {
+  chrome.storage.local.set({ mh_auto_send_attachments: els.attachAuto.checked });
 });
 
 chrome.storage.onChanged.addListener(function (changes, area) {

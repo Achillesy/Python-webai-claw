@@ -140,7 +140,10 @@ guessed into another tab.
 - If the AI estimates >1200s, it must stop and ask in normal chat first. Only
   after the user says “继续自动执行/你帮我执行” may it resend with
   `"approved":true` and a larger `timeout`.
-- Auto-send is on by default and can be turned off in the popup.
+- `Auto-send command results` is on by default and can be turned off in the popup.
+- `Auto-send attachments` is off by default. When off, attachments wait in the
+  input box for the user to press Send. The popup setting is authoritative;
+  the old AI-side `send` field is ignored.
 - After 10 consecutive automatic sends the extension pauses and posts
   `[claw:paused] ...`; the user chooses **Continue** or **Stop** in the popup.
 
