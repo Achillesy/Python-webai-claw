@@ -1,4 +1,4 @@
-﻿# Contributing to webai-claw
+# Contributing to webai-claw
 
 Thanks for helping out. This project is small on purpose — please keep it that way.
 
@@ -31,7 +31,8 @@ After changing `host.py`: reload the extension so it respawns the host.
 1. Read `AI-AGENT.md` and the two current adapters (`deepseek.js`, `muse.js`).
 2. Copy `extension/adapters/muse.js` (~100 lines) as a starting point.
 3. Implement the adapter interface: `findBlocks`, `sessionKey`, `ai`,
-   `fillResult`, `clickSend`, `isStopButton`, and `uploadFile`.
+   `fillResult`, `clickSend`, `uploadFile`, and optional `isStopButton`,
+   `isGenerating`, and `isUploading` hooks.
 4. Register the site in `extension/manifest.json` (`content_scripts[].matches`
    and `host_permissions`).
 5. Use the `probe` block (`AI-AGENT.md` §2.2) to inspect the site's DOM
@@ -50,18 +51,19 @@ AI assistants talk to the bridge with fenced `claw` code blocks and exact
 - `{"claw":"diag", ...}` — host/lease/history diagnostics
 - `{"claw":"summary", ...}` — write the handoff summary for the next Connect
 
-Keep the protocol backward compatible. New block kinds need a section in
-`AI-AGENT.md` and a security review.
+Protocol v3 is intentionally strict. New block kinds need a section in
+`AI-AGENT.md`, a host message definition, and a security review.
 
 ## Release (Chrome Web Store)
 
 See `store/` for the build script and listing materials. In short:
 
-1. `bash store/build.sh` → produces a store-ready zip (strips the dev `key`
-   so the store assigns a fresh extension ID).
-2. Upload in the Chrome Web Store developer dashboard.
-3. After the store assigns the ID, update the host manifest allowlist
-   (`native-host/install.py` templates) and tell users to re-run install.
+1. `bash store/build.sh` produces a store-ready zip and strips the dev `key`
+   so the store assigns a fresh extension ID.
+2. Upload it in the Chrome Web Store developer dashboard with the listing,
+   privacy policy, and screenshots from `store/`.
+3. After the store assigns the ID, add it to the host allowlist in
+   `native-host/install.py` and tell users to re-run install.
 
 ## License
 

@@ -1,35 +1,45 @@
-Give web AI hands on your computer.
+Give a web AI hands on your computer.
 
-Chat with a free web AI — like Muse's free tier — and tell it what you
-want done on YOUR computer. The AI writes a command, webai-claw runs it
-locally, and the result comes back into the chat. No copy-pasting, no
-switching windows, no paid API keys.
+Chat with DeepSeek or Muse and tell it what you want done on your own machine.
+When the AI needs to act, it writes a command block; webai-claw runs the command
+through a local host and returns the result to the same chat.
 
-Works with your favorite web AI: Muse, DeepSeek, ChatGPT, and Gemini.
+No API keys. No copy-pasting. No developer-operated relay server.
+
+SUPPORTED AI CHATS
+- DeepSeek: chat.deepseek.com
+- Muse: muse.ai
 
 WHAT IT DOES
-- Turn chat into action: organize files, search your disk, run git, and more —
-  just by talking.
-- Send files to the AI: ask it to read a PDF or summarize a document straight
-  from your machine, as a real chat attachment.
-- Drive desktop apps: verified with Blender — describe the 3D scene you want
-  and watch it appear.
+- Run shell commands on macOS or Windows from a web AI chat.
+- Return stdout, stderr, and exit status to the conversation.
+- Upload local files as real chat attachments.
+- Drive local applications such as Blender through their local APIs.
+- Keep the target explicit when the same chat is open on more than one
+  computer.
 
 HOW IT WORKS
-This extension is the browser half of webai-claw. It also needs the free,
-open-source local program (one install, ~5 minutes):
-  1. Install this extension.
-  2. Install the local host from the project page
-     (github.com/Achillesy/Python-webai-claw).
-  3. Open a supported AI chat and click Connect in the extension popup.
+This extension is the browser half of webai-claw. It needs the free, open-source
+local host installed on each machine that will run commands:
 
-PRIVACY & SECURITY
-- The local program opens no network ports and talks only to this extension.
-- It never sees, stores, or types your passwords; admin actions pop a system
-  dialog for you to approve.
-- Sensitive files (SSH keys, browser cookies, .env, …) are refused; uploads
-  are capped at 25MB.
-- This extension collects no data and shows no ads.
+1. Install this extension.
+2. Install the local host from the project page:
+   github.com/Achillesy/Python-webai-claw
+3. Open a supported AI chat and click Connect in the extension popup.
+
+The local host communicates with the extension through Chrome Native Messaging.
+It does not listen on a network port.
+
+PRIVACY AND SECURITY
+- The developer does not collect analytics, advertising data, or personal data.
+- The host does not prompt for, store, or fill passwords. Never put passwords in commands.
+- Sensitive paths such as SSH keys, browser cookies, and .env files are refused
+  for file uploads; a single upload is capped at 25 MB.
+- Command output and uploaded files still go to the AI site you choose. Review
+  sensitive content before sending it.
+- Privacy policy: github.com/Achillesy/Python-webai-claw/blob/master/PRIVACY.md
+
+Not affiliated with or endorsed by DeepSeek or Muse.
 
 Free for non-commercial use. Open source:
 github.com/Achillesy/Python-webai-claw

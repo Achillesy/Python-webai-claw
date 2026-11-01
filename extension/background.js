@@ -10,8 +10,8 @@ const PLATFORM_KEY = "mh_platform";
 let nativePort = null;
 const pending = new Map(); // exec id -> {port, session, gen}
 const fileBuf = new Map(); // read_file id -> accumulated file_chunks
-let fileBufTimer = null; // P1-1: single-shot timeout guard for incomplete fileBuf
-const pingTests = new Map(); // ping_test id -> {timer, sendResponse} (approach 2: popup bridge test)
+let fileBufTimer = null; // timeout guard for incomplete file buffers
+const pingTests = new Map(); // ping_test id -> {timer, sendResponse}
 const pagePorts = new Set();       // every live content-script port
 const pageInfo = new Map();        // pagePort -> {binding_id, session, ai, url, title, tabId}
 const hostRequests = new Map();    // one-shot host request id -> {cb, timer}
@@ -44,7 +44,6 @@ const portGen = new Map();  // pagePort -> current generation (default 0)
 const schedQueue = [];      // [{port, kind, msg, session, gen, graceTimer}]
 let hostBusy = false;
 let running = null;         // {id, port, session, gen, cmd, startTime}
-const GRACE_MS = 5000;
 
 function clearBadgeTimer() {
   if (badgeTimer) {
@@ -301,8 +300,7 @@ function ensureNativePort() {
       if (msg.platform) hostInfo.platform = msg.platform;
       if (msg.shell) hostInfo.shell = msg.shell;
       if (msg.host_version) hostInfo.host_version = msg.host_version;
-      // M4 strict addressing: cache local machine_id (UUID) for the content script's routing decisions;
-      // hostname kept only as a human-readable label.
+      // Cache the local machine UUID for content-script routing; the hostname is a label.
       try {
         const obj = {};
         if (msg.hostname) obj[HOSTNAME_KEY] = msg.hostname;
@@ -313,9 +311,8 @@ function ensureNativePort() {
         if (msg.platform) obj[PLATFORM_KEY] = msg.platform;
         if (Object.keys(obj).length) chrome.storage.local.set(obj);
       } catch (e) {}
-      // approach 2: popup "test bridge" pongs are claimed here by id (pingtest- prefix).
-      // this tests the link commands really travel — previously popup connected its own port, so "connected" could be a false green
-      // (2026-10-04 live-site lesson: popup showed connected while background never built a port).
+      // Popup bridge-test pongs are claimed here by id. The test travels over the
+      // same native port used by real commands.
       var pt = pingTests.get(msg.id);
       if (pt) {
         pingTests.delete(msg.id);
@@ -409,7 +406,7 @@ function ensureNativePort() {
     for (const p of pagePorts) {
       try { p.postMessage({ type: "bound", bound: false }); } catch (e) {}
     }
-    // approach 2: when host disconnects, pending bridge tests error out immediately instead of waiting for the 10s timeout
+    // Fail pending bridge tests immediately instead of waiting for their timeout.
     for (const [pid, pt] of pingTests) {
       clearTimeout(pt.timer);
       try { pt.sendResponse({ ok: false, error: "local host disconnected" }); } catch (e) {}
@@ -425,9 +422,8 @@ function ensureNativePort() {
       } catch (e) {}
     }
   });
-  // §6.7 precondition: ping on connect; pong returns hostname, cached to storage.
-  // can't rely on the user clicking the icon — manifest sets default_popup, so onClicked never fires.
-  // approach 2: popup "test bridge" no longer connects directly; everything goes through this port (tests the real link).
+  // Ping on connect. The pong carries the hostname and machine UUID, which are
+  // cached for the popup and content script. All bridge tests use this port.
   try { nativePort.postMessage({ type: "ping", id: "__init__" + Date.now() }); } catch (e) {}
   return nativePort;
 }
@@ -539,7 +535,8 @@ chrome.runtime.onConnect.addListener((pagePort) => {
       if (running && running.port === pagePort) {
         const bid = msg.binding_id || (activeBinding && activeBinding.binding_id) || "";
         try {
-          ensureNativePort().postMessage({ type: "kill", id: running.id, binding_id: bid });
+          ensureNativePort().postMessage({ type: "kill", id: running.id, binding_id: bid,
+            session: msg.session || running.session, ai: msg.ai || running.ai });
         } catch (e) {}
       }
       console.log("[webai-claw] received stop: session=" + (msg.session || "") + " gen=" + g);
@@ -584,7 +581,7 @@ function findPageForTab(tabId) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return false;
 
-  // approach 2: popup "test bridge" goes through background's native port
+  // Popup bridge tests use the background native port.
   if (msg.type === "ping_test") {
     var pid = "pingtest-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
     var timer = setTimeout(function () {
@@ -756,7 +753,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const bid = (activeBinding && activeBinding.binding_id) || msg.binding_id || "";
     if (running) {
       try {
-        ensureNativePort().postMessage({ type: "kill", id: running.id, binding_id: bid });
+        ensureNativePort().postMessage({ type: "kill", id: running.id, binding_id: bid,
+          session: running.session, ai: running.ai });
       } catch (e) {}
       sendResponse({ ok: true, killed: running.id });
     } else if (bid) {

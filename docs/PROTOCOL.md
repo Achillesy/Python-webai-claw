@@ -1,14 +1,10 @@
 # webai-claw Protocol v3
 
-> v3 is a clean break from webai-hands v2: the fence tag is `claw`, the header
-> key is `"claw"`, the execution gate is the number `"v":3` exactly, and every
-> command must name its target machine in `host`. Old blocks never trigger the
-> new extension and vice versa.
+The AI-visible protocol is a fenced `claw` block. The header is JSON on the
+first line, the action key is `claw`, the execution gate is the number `"v":3`,
+and every command names its target machine in `host`.
 
-## 1. Page → extension: the command block
-
-The AI writes a fenced `claw` code block in its reply. The content script
-parses the first line as JSON and forwards it to the native host.
+## 1. Page to extension: the command block
 
 ```claw
 {"claw":"exec","id":"2026-10-31-ls-001","host":"<UUID>","cmd":"ls ~","v":3}
@@ -24,75 +20,79 @@ git status --short
 
 Rules:
 
-- Fence language tag MUST be `claw`.
-- First line MUST be a JSON object with `claw`, `id`, `host`, and `v`.
-- `v` MUST be the number `3` exactly. Missing or different → ignored.
-- **`host` is required** and must be the target machine UUID from the latest
-  Connect attachment. Missing, `"*"`, or a mismatched UUID → not executed.
-- `id` is unique within a conversation. Content and host dedup on
-  `(session, id)`; the same id in another conversation is a different command.
-- **Do not write `session` or `ai`.** The extension stamps them.
-- The command is the `cmd` field if present, else the remaining body text.
+- The fence language tag must be `claw`.
+- The first line must be a JSON object with `claw`, `id`, `host`, and `v`.
+- `v` must be the number `3` exactly. Missing or different values are ignored.
+- `host` is required and must be the target machine UUID from the latest
+  Connect attachment. Missing, `"*"`, or a mismatched UUID is not executed.
+- `id` is unique within a conversation. Content and host deduplicate on
+  `(session, id)`. The same ID in another conversation is a different command.
+- Do not write `session` or `ai`. The extension stamps them.
+- The command is the `cmd` field if present; otherwise it is the remaining body.
 - One command per block. Split dependent steps and wait for each result.
 
-### Kinds (`"claw"` field)
+### Kinds
 
-| kind | purpose | required fields |
+| kind | Purpose | Required fields |
 |---|---|---|
-| `exec` | run a shell command on the host | `host`, `v`, `cmd` or body |
-| `probe` | read-only page DOM probe (page-local, still host-gated) | `host`, `v`, `sel` |
-| `attach` | host reads a local file, page uploads it as a chat attachment | `host`, `v`, `path` (optional `text`) |
-| `diag` | host/lease/history diagnostics | `host`, `v` |
-| `summary` | write `~/.webai-claw/handoff.md` for the next Connect | `host`, `v`, body |
+| `exec` | Run a shell command on the host | `host`, `v`, `cmd` or body |
+| `probe` | Read-only page DOM probe; stays in the page, still host-gated | `host`, `v`, `sel` |
+| `attach` | Host reads a local file; page uploads it as a chat attachment | `host`, `v`, `path` (optional `text`) |
+| `diag` | Host, lease, and history diagnostics | `host`, `v` |
+| `summary` | Write `~/.webai-claw/handoff.md` for the next Connect | `host`, `v`, body |
 
 Optional `exec` fields:
 
-- `timeout`: seconds. Default 120; autonomous max 1200; approved max 7200.
-- `approved`: only `true` after the user explicitly says “继续自动执行” or
-  “你帮我执行”.
+- `timeout`: seconds. Default 120; autonomous maximum 1200; approved maximum
+  7200.
+- `approved`: only `true` after the user explicitly says "continue
+  automatically" or "run it for me".
 
-## 2. Connect flow (machine binding)
+The `attach` kind has no `send` field in v3. Whether an attachment auto-sends is
+controlled only by the user's popup setting.
+
+## 2. Connect flow
 
 1. The user opens the extension popup and clicks **Connect**.
-2. The extension sends `{type:"connect", binding_id, session, ai, page_url,
-   page_title}` to its native host.
+2. The extension sends
+   `{type:"connect", binding_id, session, ai, page_url, page_title}` to the
+   native host.
 3. The host writes the machine lease `~/.webai-claw/runtime/active.json`.
    Only one page per machine may own the lease.
-4. The host replies `{type:"connected", ...}` (or `{type:"busy", owner, ...}` if
-   another tab/browser already owns it).
+4. The host replies `{type:"connected", ...}`, or `{type:"busy", owner, ...}`
+   when another tab or browser owns the lease.
 5. The extension sends `{type:"bound", bound:true, session, ai}` to the page,
-   then `{type:"bundle"}` to the host.
-6. The host returns `AI-AGENT.md` plus `handoff.md`; the extension uploads them
-   as a `webai-claw-connect.txt` attachment and fills a short note containing
-   `host: <UUID>`.
+   then requests `{type:"bundle"}` from the host.
+6. The host returns `AI-AGENT.md` plus `handoff.md`. The extension uploads them
+   as `webai-claw-connect.txt` and fills a short note containing `host:<UUID>`.
 7. If auto-send is on, the note is sent; otherwise the user sends it.
-8. The AI must reply in normal text with the target confirmation:
-   “已连接 <hostname>（<platform>）。后续命令将以 host:<UUID> 在 <platform>
-   上执行。” Every subsequent `claw` block must include that `host`.
-9. If another Connect attachment appears in the same conversation (e.g. the
-   same chat opened on Windows), the AI restates the newest `host`. The user
-   may name another UUID to switch back.
+8. The AI replies in normal text:
+   > Connected to `<hostname>` (`<platform>`). I will run subsequent commands
+   > on this machine with `host:<UUID>`.
+9. Every subsequent `claw` block must include that `host`. If another Connect
+   attachment appears in the same conversation, the AI uses the newest one. The
+   user may name another UUID to switch machines.
 
-New chats do not always have a session id at Connect time. The extension
-treats the placeholder URL as provisional and adopts the first real session
-for the same `binding_id` instead of disconnecting:
+New chats may not have a session ID at Connect time. The extension treats the
+placeholder URL as provisional and adopts the first real session for the same
+`binding_id`:
 
-- Muse `/thread/new` (or the bare origin) -> `/thread/<uuid>`;
-- DeepSeek bare origin or `/a/chat` -> `/a/chat/s/<uuid>`.
+- Muse `/thread/new` (or the bare origin) becomes `/thread/<uuid>`;
+- DeepSeek bare origin or `/a/chat` becomes `/a/chat/s/<uuid>`.
 
-`binding_id` is a random per-page value, not the URL. Tabs and browsers with
-the same URL therefore cannot steal the lease. Session URL and AI type are
-stored as metadata and re-checked on every command/result.
+`binding_id` is a random per-page value, not the URL. Tabs and browsers with the
+same URL cannot steal the lease. Session URL and AI type are metadata and are
+re-checked on every command and result.
 
-Stale leases (host process dead, browser gone, heartbeat older than 30s) are
-cleaned on Connect; an orphan child process is terminated first.
+Stale leases (dead host, missing browser, heartbeat older than 30 seconds) are
+cleaned on Connect. An orphan child process is terminated first.
 
-## 3. Extension → host: native messages
+## 3. Extension to host: native messages
 
-JSON objects over the native-messaging pipe (4-byte little-endian
-length-prefixed UTF-8), Chrome MV3 `chrome.runtime.connectNative`.
+Messages are JSON over Chrome Native Messaging: 4-byte little-endian
+length-prefixed UTF-8.
 
-| → host | host replies |
+| To host | Host replies |
 |---|---|
 | `{type:"ping", id}` | `{type:"pong", machine_id, hostname, platform, shell, host_version, lease}` |
 | `{type:"connect", id, binding_id, session, ai, page_url, page_title, browser?, extension_id?}` | `{type:"connected", ...}` / `{type:"busy", owner, state, stale}` |
@@ -100,25 +100,24 @@ length-prefixed UTF-8), Chrome MV3 `chrome.runtime.connectNative`.
 | `{type:"status", id}` | `{type:"state", machine_id, ..., lease}` |
 | `{type:"bundle", id, binding_id, session, ai}` | `{type:"bundle", guide, handoff, ...}` |
 | `{type:"exec", id, host, cmd, binding_id, session, ai, timeout?, approved?}` | `{type:"result", ...}` / `{type:"error", ...}` / `{type:"progress", ...}` |
-| `{type:"kill", id, binding_id}` | progress ack, then terminal result |
-| `{type:"cancel", id, binding_id}` | `{type:"result", ok}` (foreign lease) |
-| `{type:"summary", id, host, text, binding_id, session, ai}` | `{type:"result", ok}` |
+| `{type:"kill", id, binding_id}` | Progress ack, then a terminal result |
+| `{type:"cancel", id, binding_id}` | `{type:"result", ok}` for a foreign lease |
+| `{type:"summary", id, host, text, binding_id, session, ai}` | `{type:"result", kind:"summary", ...}` |
 | `{type:"read_file", id, host, path, binding_id, session, ai}` | `{type:"file_chunk", ...}` chunks / `error` |
 | `{type:"diag", id, host, binding_id, session, ai}` | `{type:"result", ...}` |
 
-Exec result fields: `id`, `ok`, `exit_code`, `stdout`, `stderr`,
-`duration_ms`, `machine_id`, `session`, `ai`, `hostname`, `platform`,
-`timeout`, `approved`, `killed`.
+Exec result fields: `id`, `ok`, `exit_code`, `stdout`, `stderr`, `duration_ms`,
+`machine_id`, `session`, `ai`, `hostname`, `platform`, `timeout`, `approved`,
+and `killed`.
 
-Binding/context matching is strict: if a lease exists, a message with a
-missing/mismatched `binding_id`, `session`, or `ai` is rejected.
+Binding and context matching is strict. A command, file read, summary, or diag
+request with a missing or mismatched `binding_id`, `session`, or `ai` is
+rejected. There is no unbound execution path.
 
-## 4. Host → page: results
+## 4. Host to page: results
 
-The extension writes results back into the AI input box as plain text. Results
-are never wrapped in a `claw` block, so they cannot self-trigger.
-
-Format:
+The extension writes results into the AI input box as plain text. Results are
+never wrapped in a `claw` block.
 
 ```text
 [claw:result] id=... ok=true exit=0 duration=0.4s machine=... session=... ai=... platform=darwin host=...
@@ -126,28 +125,31 @@ cmd: ...
 stdout...
 ```
 
-Errors use `[claw:error] id=... error=...`; diag uses `[claw:diag] ...`.
+Errors use `[claw:error] id=... error=...`; diagnostics use `[claw:diag] ...`.
+Summary uses:
 
-Routing uses the originating page port **and** `binding_id`; the content script
-re-checks that the page session/AI still match before filling. A result is never
-guessed into another tab.
+```text
+[claw:summary] id=... ok=true
+handoff: ~/.webai-claw/handoff.md
+Next: open a new chat and click Connect; the attachment will include handoff.md.
+```
 
-## 5. Timeouts, auto-send, pause
+Routing uses the originating page port and `binding_id`. The content script
+re-checks that the page session and AI type still match before filling. Results
+are never guessed into another tab.
 
-- Default timeout: 120s.
-- Autonomous maximum: 1200s.
-- Explicitly approved maximum: 7200s.
-- If the AI estimates >1200s, it must stop and ask in normal chat first. Only
-  after the user says “继续自动执行/你帮我执行” may it resend with
+## 5. Timeouts, auto-send, and pause
+
+- Default timeout: 120 seconds.
+- Autonomous maximum: 1200 seconds.
+- Explicitly approved maximum: 7200 seconds.
+- If the AI estimates more than 1200 seconds, it must stop and ask in normal
+  chat first. Only after the user explicitly approves may it resend with
   `"approved":true` and a larger `timeout`.
-- `Auto-send command results` is on by default and can be turned off in the popup.
+- `Auto-send command results` is on by default and can be turned off in the
+  popup.
 - `Auto-send attachments` is off by default. When off, attachments wait in the
-  input box for the user to press Send. The popup setting is authoritative;
-  the old AI-side `send` field is ignored.
+  input box for the user to press Send. The popup setting is authoritative.
 - After 10 consecutive automatic sends the extension pauses and posts
-  `[claw:paused] ...`; the user chooses **Continue** or **Stop** in the popup.
-
-## 6. Version history
-
-- v2: webai-hands (`muse-exec`, `"muse"`, `"v":2`).
-- v3: webai-claw (`claw`, `"claw"`, `"v":3`). Incompatible by design.
+  `[claw:paused] ...`. The user chooses **Continue** or **Stop** in the popup.
+- Automatic sends have a two-second minimum interval and a 20-per-minute limit.

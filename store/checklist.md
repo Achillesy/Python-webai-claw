@@ -1,44 +1,67 @@
 # Chrome Web Store submission checklist
 
-## Ready (in the repo)
+## Ready in the repository
 
-- [x] `store/webai-claw-store-0.4.0.zip` — release package (`bash store/build.sh` rebuilds it;
-      dev `key` stripped; first store upload assigns a new extension ID)
-- [x] Icons 16/48/128 (`extension/icons/`, referenced from the manifest)
-- [x] Store descriptions `store/listing-en.txt` / `store/listing-zh.txt`
-- [x] LICENSE (noncommercial), privacy notes (see below)
+- [x] Extension package: run `bash store/build.sh`; the version comes from
+      `extension/manifest.json` (currently 1.1.0). The build strips the dev
+      `key`; the first store upload assigns the store extension ID.
+- [x] Icons 16/48/128 under `extension/icons/`, referenced by the manifest.
+- [x] English store description: `store/listing-en.txt`.
+- [x] Privacy policy: `PRIVACY.md`.
+- [x] Noncommercial license: `LICENSE`.
+- [x] Supported sites are limited to DeepSeek and Muse.
 
-## To do by hand in the developer dashboard
+## Developer dashboard steps
 
-1. **Screenshots** (required, at least 1; 3–5 recommended):
-   - 1280×800 or 640×400
-   - Suggested content: 1. send a command block in a DeepSeek chat → result filled back; 2. attach file upload;
-     3. the extension popup panel; 4. Blender being driven
-   - Capture while actually operating it in Chrome on your M1 (a developer-mode loaded build is fine)
-2. **Small promo tile** (optional but recommended): 440×280
-3. Go to the [Chrome Web Store developer dashboard](https://chrome.google.com/webstore/devconsole) →
-   new item → upload zip → fill in the description (paste from `listing-*.txt`) → pick a category
-   (suggest Productivity) → language: English (default) + Chinese
-4. **Privacy questionnaire**: answer as follows
-   - Collects user data: no (the extension itself collects, transmits, and stores no user data)
-   - `nativeMessaging` permission purpose: communicate with the open-source host program the user installed on their own machine,
-     executing commands the user explicitly gave in chat; traffic stays on local stdio, no network ports
-   - Remote code: no (all extension code is inside the package; the host is an open-source program the user installs by hand)
-5. Submit for review (new items usually take a few hours to a few days)
+1. **Package**
+   - Run `bash store/build.sh`.
+   - Upload the generated zip as a new item.
+   - Use **Productivity** as the category.
+   - Set the listing language to **English (US)** only for this release.
+   - Short description: `Run local commands and upload files from DeepSeek or Muse chats through a user-installed native host.`
 
-## After going live (required, otherwise the host can't connect)
+2. **Screenshots**
+   - Required: at least one 1280x800 or 640x400 image.
+   - Recommended: three to five images showing the popup, a DeepSeek result
+     fill-back, attachment upload, and the Blender bridge.
+   - The repository currently keeps one Blender result image. Capture fresh
+     extension and DeepSeek screenshots before submitting; do not use the old
+     screenshots from previous releases.
+   - Optional small promo tile: 440x280.
 
-1. Note down the **new extension ID** assigned by the store.
-2. Update the allowlist/template in `native-host/install.py` (and the Windows bat),
-   adding the new ID (or replacing the dev ID).
-3. Tell users in the release notes: after installing the store version, **re-run install** (the host must recognize the new ID).
-4. Keep the dev build (`aaemlgedddakpgkfoakfmkdiiheplgnl`) for developers' own use;
-   the two IDs don't interfere with each other.
+3. **Privacy and permissions**
+   - Privacy policy URL:
+     `https://github.com/Achillesy/Python-webai-claw/blob/master/PRIVACY.md`
+   - Single purpose: connect a supported web AI chat to a user-installed local
+     host so the AI's command blocks can run on the user's own machine.
+   - `nativeMessaging`: communicate with the local host the user installed.
+   - `storage`: remember the machine binding and popup preferences.
+   - `notifications`: show disconnect and waiting-for-user status.
+   - Host permissions: `https://chat.deepseek.com/*` and
+     `https://muse.ai/*` only.
+   - Remote code: no. All extension code is packaged. The local host is an
+     open-source program the user installs separately.
+   - Data disclosure: the extension does not send data to the developer and
+     has no analytics or ads. It processes chat page content to detect command
+     blocks; commands, results, and user-requested attachments are sent to the
+     selected AI site. Local logs are metadata-only. See `PRIVACY.md`.
 
-## Privacy notes (for the dashboard questionnaire / store page)
+4. **Reviewer notes**
+   - The extension is the browser half of a local Native Messaging host.
+   - Without the host, the popup and onboarding still load; commands require
+     the host and a Connect.
+   - The host installer is at
+     `https://github.com/Achillesy/Python-webai-claw`.
+   - There is no account or test credential.
 
-> The webai-claw extension itself collects, transmits, and stores no user data; no ads,
-> no tracking. The `nativeMessaging` permission is only used to communicate with the open-source
-> host program the user installed by hand on their own machine (Chrome's official Native Messaging, local stdio, no network ports),
-> executing commands the user explicitly gave in an AI chat. File uploads require the AI to ask for them in the chat;
-> sensitive paths (SSH keys, browser cookies, .env, etc.) are always refused; single-file cap 25MB.
+5. **Before submitting**, note the extension ID assigned by the store and add
+   it to `EXTENSION_IDS` in `native-host/install.py`. Rebuild/push the
+   installer so a reviewer who installs the host can connect. Keep the dev ID
+   `feifgnelfehkjlimiolepkmffgbjcong` for local development.
+
+6. Submit for review.
+
+## After going live
+
+Tell users to re-run the host installer after installing the store build so the
+host allowlist contains the store extension ID.

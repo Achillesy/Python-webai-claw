@@ -119,7 +119,7 @@ function render(st) {
   } else {
     lines.push('this tab: unavailable');
   }
-  if (paused) lines.push('PAUSED after 10 automatic sends. Choose Continue or Stop.');
+  if (paused) lines.push('PAUSED. Choose Continue or Stop.');
   els.detail.textContent = lines.join('\n');
 
   var ownActive = !!(active && tab && active.binding_id === tab.binding_id);

@@ -1,58 +1,113 @@
 # webai-claw
 
-Give web AI claws on your computer — turn Q&A into output.
+Give a web AI hands on your own computer. webai-claw turns a chat request into
+a local command, runs it on your machine, and returns the result to the chat.
 
-webai-claw is a Chrome extension plus a local Python host. You chat with a web
-AI (DeepSeek, Muse, …) as usual; when the AI needs to *do* something on your
-machine, it writes a `claw` block. The extension picks the block up, the local
-host runs the command, and the result lands back in the chat.
+Supported AI chat sites: **DeepSeek** (`chat.deepseek.com`) and **Muse**
+(`muse.ai`).
 
-```claw
-{"claw":"exec","id":"demo-1","host":"<UUID>","cmd":"echo hello","v":3}
-```
+## What it does
 
-Every command must carry a target `host` UUID from the latest Connect
-attachment and exact `"v":3`. `session` and `ai` are stamped locally.
+- Run shell commands on macOS or Windows from a web AI chat.
+- Return command output to the same conversation.
+- Upload local files as real chat attachments when the AI asks.
+- Drive local applications such as Blender through their local APIs.
+- Keep the execution target explicit when the same conversation is open on
+  more than one computer.
 
-No API keys. The AI you already pay for (or use for free) becomes the brain;
-your computer becomes its hands.
+No API keys and no developer-operated relay server. The extension talks to a
+local Python host through Chrome Native Messaging. The host never listens on a
+network port.
 
-## How it works
+## Requirements
 
-1. **Extension** — content scripts watch supported AI chat pages for
-   `claw` blocks; the background service worker dedups and routes them.
-2. **Native host** — a Python program registered with Chrome via Native
-   Messaging. It executes commands and streams results back.
-3. **Installer** — `native-host/install.py` sets everything up per machine
-   (`~/.webai-claw/`, Chrome registration, operator guides).
+- Google Chrome (desktop).
+- macOS or Windows.
+- Python 3 on the machine that will run commands.
+- One-time installation of the local host.
 
-Protocol: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) (v3).
-Design notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The Chrome extension is only the browser half. The local host must be installed
+on each machine separately.
 
-## Quick start
+## Install
+
+### 1. Install the local host
+
+macOS:
 
 ```bash
-# 1. Install the host (macOS / Windows)
-python3 native-host/install.py
-
-# 2. Load the extension
-#    chrome://extensions → Developer mode → Load unpacked → extension/
-
-# 3. Open a supported AI chat, click the toolbar icon, then click Connect.
-#    The extension sends the operator guide and local config into the chat.
+curl -fsSL https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py | python3
 ```
 
-To operators (AIs): read `AI-AGENT.md`. For file-producing workflows
-(Blender etc.): `AI-BLENDER.md`.
+Windows PowerShell:
 
-## Relationship to webai-hands
+```powershell
+py -3 -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py').read())"
+```
 
-webai-claw is the rename-upgrade of
-[webai-hands](https://github.com/Achillesy/Python-webai-hands), rebuilt from
-the ground up (see [`docs/ORIGIN.md`](docs/ORIGIN.md)). The two products
-coexist: v2 blocks (`` `muse-exec ``) never trigger webai-claw and v3 blocks
-(`` `claw ``) never trigger webai-hands.
+The installer creates `~/.webai-claw/`, installs the host and operator guides,
+and registers the Native Messaging host with Chrome. It is idempotent; re-run it
+to update the host.
+
+### 2. Install the extension
+
+Install the Chrome Web Store build when available, or load the unpacked
+extension for development:
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Choose **Load unpacked** and select the `extension/` directory.
+
+### 3. Connect
+
+1. Open a supported AI chat.
+2. Click the webai-claw toolbar icon.
+3. Click **Connect**.
+4. The extension uploads `AI-AGENT.md` and the local configuration into the
+   chat.
+
+The AI will confirm the target machine. Every command block must include the
+machine UUID and exact `"v":3`.
+
+## Popup options
+
+- **Auto-send command results** (default on): send command output back to the
+  chat automatically.
+- **Auto-send attachments** (default off): send uploaded files automatically.
+  When off, attachments wait in the input box for you to press Send.
+- **Interrupt**, **Continue**, and **Stop** control the current run.
+- **Test Bridge** checks the Native Messaging connection.
+
+The toolbar badge is intentionally minimal:
+
+- no mark: not connected;
+- `✓`: connected;
+- `...`: the native host has been running a command for 5 seconds.
+
+## Protocol and design
+
+- [Protocol v3](docs/PROTOCOL.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Contributing](docs/CONTRIBUTING.md)
+- [Privacy](PRIVACY.md)
+- [Changelog](docs/CHANGELOG.md)
+
+The AI operator guide is [AI-AGENT.md](AI-AGENT.md). For Blender workflows,
+also attach [AI-BLENDER.md](AI-BLENDER.md) in the chat.
+
+## Security
+
+- The host runs commands only for the connected page and the matching machine
+  UUID.
+- Sensitive paths such as `.ssh`, `.aws`, `.env`, private keys, and browser
+  cookies are refused for file uploads.
+- The AI operator guide requires explicit user confirmation before destructive commands.
+- The host does not prompt for, store, or fill passwords. Do not put passwords in commands.
+- Command output and uploaded files still go to the AI site you are using.
+  Review them before sending sensitive content.
+
+See [PRIVACY.md](PRIVACY.md) for the data flow.
 
 ## License
 
-webai-claw Noncommercial License — see [LICENSE](LICENSE).
+webai-claw Noncommercial License. See [LICENSE](LICENSE).

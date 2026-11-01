@@ -99,7 +99,6 @@
       var sels = [
         'button[data-testid="send-button"]',
         'button[aria-label*="Send"]',
-        'button[aria-label*="发送"]',
         'button[type="submit"]'
       ];
       for (var i = 0; i < sels.length; i++) {

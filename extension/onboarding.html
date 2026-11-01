@@ -29,7 +29,7 @@
 <body>
 <div class="wrap">
   <h1>Welcome to webai-claw</h1>
-  <p class="sub">One more step: this extension needs a small local helper before the AI can run commands on your computer.</p>
+  <p class="sub">One more step: this extension needs a small local helper before the AI can run commands on your computer. The helper is a separate open-source program; it is not bundled with the extension.</p>
 
   <div class="card">
     <h2>Status</h2>
@@ -41,23 +41,25 @@
   <div class="card" id="install-card">
     <h2>Step 1 — Install the local helper</h2>
     <p>Copy the line for your system, paste it into a terminal, press Enter. No admin rights needed.</p>
-    <p><strong>macOS / Linux</strong></p>
+    <p><strong>macOS</strong></p>
     <div class="cmd"><button class="small" data-copy="cmd-mac">Copy</button><code id="cmd-mac">curl -fsSL https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py | python3</code></div>
     <p><strong>Windows (PowerShell)</strong></p>
     <div class="cmd"><button class="small" data-copy="cmd-win">Copy</button><code id="cmd-win">py -3 -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py').read())"</code></div>
-    <p class="hint">This installs the helper into <span class="uuid">~/.webai-claw/</span> and registers it with Chrome.</p>
+    <p class="hint">You run this command in your own terminal. The extension does not download or execute remote code. It installs the helper into <span class="uuid">~/.webai-claw/</span> and registers it with Chrome.</p>
   </div>
 
   <div class="card" id="success">
     <h2>Step 2 — Connect in the AI chat</h2>
-    <p>Your machine ID (shown for reference; command blocks do not need it):</p>
+    <p>Your machine ID (the <span class="uuid">host</span> value for command blocks):</p>
     <p><span class="uuid" id="uuid"></span> <button class="small" id="copy-uuid">Copy UUID</button></p>
     <p>Open <a href="https://muse.ai" target="_blank">muse.ai</a> or
        <a href="https://chat.deepseek.com" target="_blank">chat.deepseek.com</a>,
        click the webai-claw toolbar icon, then click <strong>Connect</strong>.</p>
     <p>The extension attaches <span class="uuid">AI-AGENT.md</span> and the local
-       config automatically. Then just ask in natural language, e.g.
-       “Show my home directory.” The AI will reply with a command block like:</p>
+       config automatically. For Blender tasks, attach
+       <span class="uuid">AI-BLENDER.md</span> too. Then ask in natural language,
+       for example: “Show my home directory.” The AI will reply with a command
+       block like:</p>
     <div class="example" id="example"></div>
     <p class="hint">Only exact <span class="uuid">"v":3</span> blocks execute.
        Every command must carry the target <span class="uuid">host</span> UUID;

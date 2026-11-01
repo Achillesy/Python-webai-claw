@@ -1,63 +1,89 @@
-﻿# AI-BLENDER.md — 用 webai-claw 驱动 Blender（给 AI 助手）
+# AI-BLENDER.md — drive Blender with webai-claw
 
-> 用户想在 Blender 里建模、挪东西、渲染时读这份。前提：webai-claw
-> 已装好、桥已通（安装见 README.md）。本文件里的命令块同样必须带
-> `host`（目标机 UUID）和 `"v":3`，规则见 AI-AGENT.md。
+> Use this guide when the user wants to build, move, or render something in
+> Blender. webai-claw must already be connected, and every `claw` block still
+> needs `host` and exact `"v":3` as described in `AI-AGENT.md`.
 
-## 0. 原理
+## 1. How the bridge works
 
-Blender 装了官方 Blender Lab MCP 插件后，会在 localhost:9876 上监听一个
-socket，协议是 null 字节分隔的 JSON：
+The official Blender Lab MCP extension (`Extension id: mcp`) listens on a local
+socket at `localhost:9876`. Messages are null-byte-delimited JSON:
 
-    {"type":"execute","code":"<python代码>","strict_json":true}
+```json
+{"type":"execute","code":"<python code>","strict_json":true}
+```
 
-不需要 MCP 客户端 App，也不需要独立 server 进程——直连 socket 就行。
+No MCP desktop app or extra server is needed. The installed client connects to
+that socket directly.
 
-## 1. 前置条件
+## 2. Prerequisites
 
-1. Blender 装了官方 Blender Lab MCP 插件（Extension id `mcp`）。
-2. Blender 里打开 "Allow Online Access"——否则插件自启动 timer 不注册，
-   9876 没人监听。**开了之后要重启 Blender 才生效。**
+1. Install the official Blender Lab MCP extension (`mcp`) in Blender.
+2. Enable **Allow Online Access** in Blender. Without it, the extension's
+   startup timer does not register and nothing listens on port 9876.
+3. Restart Blender after enabling it.
+4. Verify that port 9876 is listening.
 
-**如果 9876 没有监听、且用户确认没装过插件 → 停下，让用户去装官方
-Blender Lab MCP 插件（Extension id `mcp`）。不要试图自己写一个 socket
-服务端或替代控制器塞进 Blender——那是用户的动作，不是你的。** 引导用户：
+If port 9876 is not listening and the user has not installed the extension,
+stop. Ask the user to install and restart Blender. Do not write a replacement
+socket server or controller into Blender.
 
-1. 在 Blender 的 Extensions 面板里搜索并安装 Extension id `mcp`
-   （官方 Blender Lab MCP 插件）。
-2. 勾选 "Allow Online Access"。
-3. **重启 Blender**。
-4. 回来重测 9876 是否有人监听。
+## 3. Sending Python to Blender
 
-插件装好之前，别往下走 §2 的发命令步骤。
+Write the Python code to a temporary file with an `exec` block, then run the
+installed client with a second block:
 
-## 2. 怎么发命令
+```text
+py -3 %USERPROFILE%\.webai-claw\skill\mcp_exec.py D:\tmp\do.py        (Windows)
+python3 ~/.webai-claw/skill/mcp_exec.py /tmp/do.py                    (macOS)
+```
 
-把 Python 代码写进一个文件，再用安装时放进 `~/.webai-claw/skill/` 的客户端发
-（固定路径，与仓库位置无关；重跑一遍 install.py 即可获得）：
+Keep the two steps separate so failures are easy to locate.
 
-    py -3 %USERPROFILE%\.webai-claw\skill\mcp_exec.py D:\tmp\do.py        （Windows）
-    python3 ~/.webai-claw/skill/mcp_exec.py /tmp/do.py                    （macOS）
+Typical flow:
 
-典型做法：先发 claw 块把 Python 代码写到临时文件，再发一块调
-mcp_exec.py 执行它。两步分开，出错好定位。
+1. `exec`: write the Blender Python script to a local file.
+2. `exec`: run `mcp_exec.py` against that file.
+3. `attach`: upload a rendered image or exported file when the user wants it.
 
-## 3. 已验证能力（2026-10-02）
+## 4. Verified capabilities
 
-- 新建方体、移动、缩放（用户亲眼看着立方体出现）
-- 熊猫模型（2026-10-05）：bmesh data API 建 17 个部件（身/头/耳/眼斑/眼/高光/鼻/臂/脚/尾）、相机 TRACK_TO 取景、EEVEE 渲染出图，全程经 webai-claw exec/attach 闭环；注意相机取景第一次太紧裁掉头顶，拉远 25% 解决
+- Create, move, and scale primitives.
+- Build a multi-part model with the bmesh data API, frame it with a camera
+  using `TRACK_TO`, render with EEVEE, and return the image through `attach`.
+- The full loop has been verified: chat command -> webai-claw exec -> Blender
+  socket -> render -> attach -> image in chat.
 
-## 4. 坑
+## 5. Rendering an image
 
-- **优先用 data API**（bpy.data / bmesh）而不是 bpy.ops——socket 执行
-  不一定有视口上下文，bpy.ops 可能报 context 错误。
-- **别选默认场景里已有的东西**（默认场景自带一个 Cube）——要么先删默认物体。
-- 9876 没监听 → 多半是 "Allow Online Access" 没开，或开了没重启 Blender。
+Prefer the data API (`bpy.data`, `bmesh`) over `bpy.ops`. The socket execution
+context may not have a viewport, and `bpy.ops` can raise context errors.
 
-## 5. 安全边界
+A reliable test task:
 
-这等于在用户 Blender 里执行任意代码。
+1. clear the default scene;
+2. add a cube, a camera, and a light;
+3. set the camera with `TRACK_TO`;
+4. render with EEVEE to a known absolute path such as
+   `/tmp/webai-claw-blender-test.png`;
+5. verify the file exists;
+6. use an `attach` block to upload it.
 
-- 先只读侦察（列物体、看属性），再动手改。
-- 删除、覆盖文件或大改场景前，先把完整代码给用户看，等他同意。
-- 清空场景、覆盖 .blend 这类破坏性操作，尤其要确认。
+## 6. Common pitfalls
+
+- The default scene already contains a Cube. Delete or reuse it explicitly.
+- `bpy.ops` may fail without viewport context; use data APIs.
+- If port 9876 is not listening, **Allow Online Access** is usually off, or
+  Blender was not restarted after enabling it.
+- Framing can clip the top of a model. Pull the camera back and re-render.
+- Large renders can take time; use a reasonable `timeout`.
+
+## 7. Safety
+
+Running Python through this bridge is equivalent to executing arbitrary code in
+the user's Blender session.
+
+- Inspect first: list objects and read properties before changing the scene.
+- Before deleting objects, overwriting files, or making major scene changes,
+  show the full code and wait for explicit user consent.
+- Be especially careful with clearing the scene or overwriting `.blend` files.

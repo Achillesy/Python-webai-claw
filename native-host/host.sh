@@ -1,5 +1,5 @@
 #!/bin/sh
-# webai-claw host launcher (macOS / Linux).
+# webai-claw host launcher (macOS).
 # Prefers the interpreter from the install dir's .venv, falls back to system python3.
 DIR=$(dirname "$0")
 if [ -x "$DIR/.venv/bin/python" ]; then

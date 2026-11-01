@@ -9,10 +9,10 @@
 // Adding a new Web AI = new adapters/xxx.js + register in manifest;
 // zero core changes.
 //
-// Rules: caught blocks go to the local host for real execution; results are
-// only filled back, never auto-sent (unless the user manually enabled auto-send
-// in the extension panel); executed ids are written to chrome.storage.local so
-// refreshing the page never replays history commands.
+// Rules: caught blocks go to the local host for real execution. Results are
+// filled back into the input box and are auto-sent only when the corresponding
+// popup option is enabled. Executed ids are stored in chrome.storage.local so a
+// page refresh never replays old commands.
 
 (function () {
 'use strict';
@@ -37,25 +37,9 @@ if (!adapter) {
   console.log('[webai-claw] no adapter for this site: ' + location.hostname + '; content script disabled');
   return;
 }
-// Adapters may declare isActive() as a page-level gate (www.google.com: only AI Mode
-// pages active, plain search pages off). SPA client-side routing doesn't re-run the
-// content script, so don't return directly here; scan() lazily checks each time and
-// auto-enables/disables as the page changes.
-function adapterActive() {
-  try { return !adapter.isActive || adapter.isActive(); }
-  catch (e) { return false; }
-}
-if (adapterActive()) {
-  console.log('[webai-claw] adapter selected: ' + adapter.name + ' (' + location.hostname + ')');
-} else {
-  console.log('[webai-claw] adapter selected: ' + adapter.name + ', but not applicable to this page; waiting for page change');
-}
-// Adapters may declare blockText(el) for custom block text extraction (default el.innerText).
-// Google AI Mode's code-block container starts with a language label line; must jump to the JSON line.
-function blockTextOf(el) {
-  try {
-    if (adapter.blockText) return adapter.blockText(el) || '';
-  } catch (e) {}
+console.log('[webai-claw] adapter selected: ' + adapter.name + ' (' + location.hostname + ')');
+
+function elementText(el) {
   return el.innerText || el.textContent || '';
 }
 
@@ -77,9 +61,7 @@ var flushHardDeadline = 0;
 var incompleteWarned = {};
 var attachMeta = {};
 var baselineIds = {};
-var ctxChars = 0;
-var ctxWarned = false;
-var PLACEHOLDER_IDS = { "唯一id": 1, "任意唯一id": 1, "your-id": 1, "example": 1, "示例": 1, "xxx": 1 };
+var PLACEHOLDER_IDS = { "your-id": 1, "example-id": 1, "sample-id": 1, "xxx": 1 };
 function isPlaceholderId(id) {
   var s = String(id || '');
   return !!PLACEHOLDER_IDS[id] || /^(example|sample)[-_]/i.test(s);
@@ -262,7 +244,7 @@ function abortChain(reason) {
   // were never scanned; otherwise Stop would let them execute afterwards.
   try {
     adapter.findBlocks().forEach(function (el) {
-      var b = parseBlock(blockTextOf(el));
+      var b = parseBlock(elementText(el));
       if (b) markProcessed(b.id);
     });
   } catch (e) {}
@@ -330,7 +312,6 @@ function parseBlock(text) {
     kind: head.claw,
     id: String(head.id),
     host: (typeof head.host === 'string') ? head.host : null,
-    shell: head.shell || null,
     timeout: head.timeout || null,
     approved: head.approved === true,
     sel: (typeof head.sel === 'string') ? head.sel : null,
@@ -515,7 +496,7 @@ function getPort() {
         // before Connect must never run just because the page became bound.
         try {
           adapter.findBlocks().forEach(function (el) {
-            var b = parseBlock(blockTextOf(el));
+            var b = parseBlock(elementText(el));
             if (b) markProcessed(b.id);
           });
         } catch (e) {}
@@ -644,13 +625,11 @@ function execBlock(block) {
       binding_id: BINDING_ID,
       gen: gen,
       cmd: block.cmd,
-      shell: block.shell,
       timeout: block.timeout,
       approved: !!block.approved
     });
-    // only book it once sent: a postMessage throw means it never went out — don't mark
-    // processed then, so the same block can be resent after refresh without losing the command
-    // (the old code booked first, causing post-refresh skips).
+    // Book the block only after postMessage succeeds. If sending throws, leave it
+    // unprocessed so a refresh can resend it without losing the command.
     markProcessed(block.id);
   } catch (e) {
     delete inFlight[block.id];
@@ -660,7 +639,7 @@ function execBlock(block) {
   }
 }
 
-// ---------- result format (M3 finalized) ----------
+// ---------- result formatting ----------
 function clip(s) {
   if (s == null) return '';
   s = String(s);
@@ -720,8 +699,8 @@ function onFileArrived(msg) {
     fillBack('[claw:attach] id=' + msg.id + ' error=adapter upload threw: ' + e.message);
     return;
   }
-  // uploadFile may return {ok, why} synchronously or a Promise (gemini needs the upload menu
-  // opened first, then waits for the input to render). Promise.resolve covers both.
+  // uploadFile may return {ok, why} synchronously or a Promise when an adapter
+  // must open an upload menu and wait for the input to render.
   Promise.resolve(res).then(function (r) {
     if (!r || !r.ok) {
       fillBack('[claw:attach] id=' + msg.id + ' error=upload failed: ' + ((r && r.why) || 'unknown'));
@@ -762,9 +741,9 @@ function sendConnectAttachment(config) {
   var session = sessionKeyOf();
   var ai = aiType();
   var lines = [];
-  lines.push('# webai-claw 连接配置');
+  lines.push('# webai-claw connection');
   lines.push('');
-  lines.push('## 本机');
+  lines.push('## Local machine');
   lines.push('- host: ' + (config.machine_id || localMachineId || ''));
   lines.push('- session: ' + session);
   lines.push('- ai: ' + ai);
@@ -774,11 +753,11 @@ function sendConnectAttachment(config) {
   lines.push('- protocol: 3');
   lines.push('- host_version: ' + (config.host_version || ''));
   lines.push('');
-  lines.push('## 协议');
+  lines.push('## Protocol');
   lines.push(config.guide || '(AI-AGENT.md missing; re-run install.py)');
   if (config.handoff) {
     lines.push('');
-    lines.push('## 上一次会话交接');
+    lines.push('## Previous handoff');
     lines.push(config.handoff);
   }
   var text = lines.join('\n');
@@ -798,16 +777,17 @@ function sendConnectAttachment(config) {
       return;
     }
     var targetHost = config.machine_id || localMachineId || '?';
-    var note = '已连接本机 ' + (config.hostname || 'this computer') +
-      '（' + (config.platform || '?') + ' / ' + (config.shell || '?') + '）。\n' +
+    var note = 'Connected to ' + (config.hostname || 'this computer') +
+      ' (' + (config.platform || '?') + ' / ' + (config.shell || '?') + ').\n' +
       'host: ' + targetHost + '\nsession: ' + session + '\nai: ' + ai + '\n' +
-      '请阅读附件中的协议。回复时用普通文字明确写出：\n' +
-      '“已连接 <hostname>（<platform>）。后续命令将以 host:' + targetHost +
-      ' 在 <platform> 上执行。”\n' +
-      '之后每条 claw 块必须写 "host":"' + targetHost + '" 和 "v":3；' +
-      'session/ai 不要写，扩展会补。\n' +
-      '如果同一对话出现新的 Connect 附件，以最新附件的 host 为准；用户指定其他 UUID 时按用户的来。\n' +
-      '回复确认后等待任务。';
+      'Read the attached protocol. Reply in normal text with:\n' +
+      '"Connected to <hostname> (<platform>). I will run subsequent commands ' +
+      'on this machine with host:' + targetHost + '."\n' +
+      'Every claw block must include "host":"' + targetHost + '" and "v":3. ' +
+      'Do not write session or ai; the extension adds them.\n' +
+      'If a newer Connect attachment appears in this conversation, use its host. ' +
+      'If the user names another UUID, follow the user.\n' +
+      'Wait for the task.';
     var ok = false;
     try { ok = adapter.fillResult(note); } catch (e) { ok = false; }
     if (!ok) { fillOnly('[connect] connected, but could not fill the input box'); return; }
@@ -966,12 +946,6 @@ function formatResult(res) {
 
 // ---------- fill-back (handed to adapter) ----------
 function fillBack(text, opts) {
-  ctxChars += (text ? text.length : 0);
-  if (!ctxWarned && aiType() === 'deepseek' && ctxChars > 150000) {
-    ctxWarned = true;
-    text = text + '\n\n[webai-claw] DeepSeek context is getting long (' + ctxChars +
-      ' chars filled back). Stop exec commands, send a `summary` block now, then ask the user to open a new chat and click Connect.';
-  }
   var ok = false;
   try { ok = adapter.fillResult(text); } catch (e) {
     console.error('[webai-claw] adapter.fillResult threw: ', e);
@@ -1014,11 +988,11 @@ function pauseAutoSend(kind) {
   notifyWaiting('paused');
   var note;
   if (kind === 'rate') {
-    note = '[claw:paused] 自动发送过于频繁（' + MAX_AUTO_SENDS_PER_MINUTE +
-      ' 条/分钟），已暂停。请在扩展 popup 点“继续”或“停止”。';
+    note = '[claw:paused] Auto-send is rate-limited (' +
+      MAX_AUTO_SENDS_PER_MINUTE + '/min); paused. Click Continue or Stop in the extension popup.';
   } else {
-    note = '[claw:paused] 已连续自动执行 ' + PAUSE_AFTER +
-      ' 条命令，已暂停。请在扩展 popup 点“继续”或“停止”。';
+    note = '[claw:paused] Paused after ' + PAUSE_AFTER +
+      ' consecutive automatic sends. Click Continue or Stop in the extension popup.';
   }
   var ok = false;
   try { ok = adapter.fillResult(note); }
@@ -1133,7 +1107,6 @@ function sendWithRetry(opts) {
 function scan() {
   if (!ready) return;
   if (contextDead) return;  // extension reloaded: the old context can't do anything useful; wait for user refresh
-  if (!adapterActive()) return;  // page-level switch (e.g. google.com non-AI-Mode pages)
   var els;
   try { els = adapter.findBlocks(); } catch (e) {
     console.error('[webai-claw] adapter.findBlocks threw: ', e);
@@ -1144,7 +1117,7 @@ function scan() {
   // chat. Otherwise connecting later would execute historical commands.
   if (!bound) {
     els.forEach(function (el) {
-      var b = parseBlock(blockTextOf(el));
+      var b = parseBlock(elementText(el));
       if (b && !isProcessed(b.id) && !inFlight[b.id]) {
         baselineIds[b.id] = true;
         markProcessed(b.id);
@@ -1187,7 +1160,7 @@ function scan() {
   }
   if (boundAi && aiType() !== boundAi) return;
   els.forEach(function (el) {
-    var text = blockTextOf(el);
+    var text = elementText(el);
     var block = parseBlock(text);
     if (!block || isProcessed(block.id) || inFlight[block.id]) return;
     // While paused, still allow a summary block to write the handoff file.
@@ -1231,7 +1204,7 @@ function scan() {
       delete stableTimers[fp];
       if (genAtSchedule !== gen) return;  // voided by a newer generation; don't forward
       if (userAborted || isProcessed(block.id) || inFlight[block.id]) return;
-      var again = parseBlock(blockTextOf(el));
+      var again = parseBlock(elementText(el));
       if (!again) return;
       var fireTarget = targetGate(again);
       if (fireTarget === 'defer') return;

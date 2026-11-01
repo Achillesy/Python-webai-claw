@@ -13,8 +13,8 @@
 #    Windows, Chrome's NativeMessagingHosts dir on macOS. The manifest
 #    points at the installed copy, never at the repo.
 #
-# Two extension IDs are allowlisted: the dev build (pinned by the key
-# in extension/manifest.json) and the Chrome Web Store build.
+# The dev extension ID is allowlisted below. Add the Chrome Web Store
+# extension ID after the first store upload.
 
 import json
 import os
@@ -28,7 +28,7 @@ EXTENSION_IDS = [
     "feifgnelfehkjlimiolepkmffgbjcong",  # dev build (unpacked)
     # Chrome Web Store build: append its ID here after the first store upload.
 ]
-STORE_URL = "https://github.com/Achillesy/Python-webai-claw"  # no store listing yet
+PROJECT_URL = "https://github.com/Achillesy/Python-webai-claw"
 try:
     HERE = os.path.dirname(os.path.abspath(__file__))
 except NameError:
@@ -37,8 +37,8 @@ except NameError:
     # standalone mode: fetch the host files from the network.
     HERE = None
 INSTALL_DIR = os.path.expanduser("~/.webai-claw")
-HOST_FILES = ["host.py", "host.sh", "host.bat", "ctx_summary.py",
-              "skill/mcp_exec.py"]  # Blender MCP socket client (fixed path below)
+HOST_FILES = ["host.py", "host.sh", "host.bat",
+              "skill/mcp_exec.py"]  # Blender MCP socket client
 # AI operator guides live at the repo root, not under native-host/.
 DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md"]
 # Where to fetch the host program when install.py is downloaded standalone
@@ -255,10 +255,11 @@ def main():
     print("Host manifest: %s" % manifest_path)
     print("Allowlisted extension IDs: %s" % ", ".join(EXTENSION_IDS))
     print(
-        "Next: install the extension from the Chrome Web Store:\n"
-        "  %s\n"
+        "Next: install the extension from the Chrome Web Store, or load\n"
+        "extension/ unpacked for development.\n"
+        "Project: %s\n"
         "Open a supported AI chat, click the webai-claw toolbar icon, and click Connect."
-        % STORE_URL
+        % PROJECT_URL
     )
     print(
         "AI guides installed to %s\n"

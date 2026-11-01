@@ -6,9 +6,9 @@
 # never listens on any network port.
 #
 # Security: only allowlisted extension IDs can wake it (see install.py's
-# allowed_origins). Passwords and privilege escalation never pass through
-# here — when elevation is needed, the command itself triggers the OS
-# UAC prompt; the host neither receives nor stores any credentials.
+# allowed_origins). The host does not prompt for credentials. Elevation is
+# handled by the operating system (for example, a UAC prompt); the host does
+# not store credentials. Never put secrets in a command.
 #
 # Layout: the host lives in ~/.webai-claw/ (installed by install.py).
 # Runtime state goes under log/, reusable scripts under skill/.
@@ -20,7 +20,6 @@ import hashlib
 import json
 import mimetypes
 import os
-import re
 import signal
 import socket
 import struct
@@ -29,10 +28,9 @@ import sys
 import threading
 import time
 import uuid
-import ctx_summary
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "1.0.1"
+HOST_VERSION = "1.1.0"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
@@ -48,7 +46,6 @@ AUTO_TIMEOUT_MAX = 1200  # seconds; AI may set up to 20 min without explicit use
 APPROVED_TIMEOUT_MAX = 7200  # seconds; hard ceiling after the user explicitly approves
 HOST_CWD = os.path.expanduser("~")  # fixed cwd: predictable, idempotent
 HISTORY_PATH = os.path.join(LOG_DIR, "exec_history.jsonl")
-OLD_HISTORY_PATH = os.path.join(LOG_DIR, "exec_history.json")
 HISTORY_LOCK = os.path.join(LOG_DIR, "exec_history.lock")
 HISTORY_LIMIT = 500  # keep the most recent 500 (session,id) execution records
 HISTORY_MAX_BYTES = 1 * 1024 * 1024  # compact when the JSONL file grows past 1MB
@@ -103,22 +100,16 @@ def _byte_len(v):
 def slim_entry(key, v):
     """History is metadata only: no command text and no output text."""
     v = v if isinstance(v, dict) else {}
-    cmd_len = v.get("cmd_len")
-    if cmd_len is None:
-        cmd_len = _byte_len(v.get("cmd"))
-    stdout_len = v.get("stdout_len")
-    if stdout_len is None:
-        stdout_len = _byte_len(v.get("stdout_head") or v.get("stdout"))
     return {
         "id": v.get("id", key),
         "ok": v.get("ok"),
         "exit_code": v.get("exit_code"),
         "duration_ms": v.get("duration_ms", 0),
         "ts": v.get("ts", 0),
-        "session_key": v.get("session_key") or _session_key(v.get("session") or ""),
+        "session_key": v.get("session_key") or "",
         "ai": v.get("ai", ""),
-        "cmd_len": int(cmd_len or 0),
-        "stdout_len": int(stdout_len or 0),
+        "cmd_len": int(v.get("cmd_len") or 0),
+        "stdout_len": int(v.get("stdout_len") or 0),
         "stderr_len": int(v.get("stderr_len") or 0),
     }
 
@@ -126,8 +117,7 @@ def slim_entry(key, v):
 def _history_key(v):
     """Dedup key: session fingerprint + id (never the raw session URL)."""
     v = v if isinstance(v, dict) else {}
-    sess = v.get("session_key") or _session_key(v.get("session") or "")
-    return "%s|%s" % (sess, v.get("id") or "")
+    return "%s|%s" % (v.get("session_key") or "", v.get("id") or "")
 
 
 def _iter_history(path):
@@ -194,27 +184,6 @@ def load_history():
     for obj in _iter_history(HISTORY_PATH):
         key = _history_key(obj)
         hist[key] = slim_entry(str(obj.get("id") or ""), obj)
-    # One-time migration from the old whole-file JSON history.
-    if not hist and os.path.exists(OLD_HISTORY_PATH):
-        try:
-            with open(OLD_HISTORY_PATH, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            raw = {}
-        if isinstance(raw, dict):
-            for k, v in raw.items():
-                v = dict(v) if isinstance(v, dict) else {}
-                v.setdefault("id", str(k))
-                hist[_history_key(v)] = slim_entry(str(k), v)
-        if hist:
-            try:
-                with open(HISTORY_PATH, "a", encoding="utf-8") as f:
-                    for v in hist.values():
-                        f.write(json.dumps(v, ensure_ascii=False,
-                                          separators=(",", ":")) + "\n")
-                os.replace(OLD_HISTORY_PATH, OLD_HISTORY_PATH + ".migrated")
-            except OSError:
-                pass
     return _trim_history(hist)
 
 
@@ -223,72 +192,6 @@ def refresh_history():
     global HISTORY
     HISTORY = load_history()
     return HISTORY
-
-
-def scrub_history_privacy():
-    """Rewrite old history records to metadata only (one-way privacy migration)."""
-    if not os.path.exists(HISTORY_PATH):
-        return
-    raw = list(_iter_history(HISTORY_PATH))
-    if not raw:
-        return
-    needs = any(("cmd" in obj or "stdout_head" in obj or "stdout" in obj or
-                 "session" in obj) for obj in raw)
-    if not needs:
-        return
-    lock_fd = _acquire_lock(HISTORY_LOCK, 5.0)
-    if lock_fd is None:
-        return
-    tmp = HISTORY_PATH + ".privacy.%d" % os.getpid()
-    try:
-        hist = load_history()
-        with open(tmp, "w", encoding="utf-8") as f:
-            for v in sorted(hist.values(), key=lambda x: x.get("ts", 0)):
-                f.write(json.dumps(v, ensure_ascii=False,
-                                   separators=(",", ":")) + "\n")
-        os.replace(tmp, HISTORY_PATH)
-        log("history privacy scrub: command/output/session text removed")
-    except OSError:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-    finally:
-        _release_lock(lock_fd, HISTORY_LOCK)
-
-
-def scrub_log_privacy():
-    """Redact old host.log lines that predate the privacy changes."""
-    if not os.path.exists(LOG_PATH):
-        return
-    try:
-        with LOG_LOCK:
-            lines = open(LOG_PATH, encoding='utf-8', errors='replace').readlines()
-            changed = False
-            out = []
-            for line in lines:
-                newline = line
-                # cmd=%r is last on our exec lines; drop the whole tail.
-                if 'cmd=' in newline:
-                    newline = re.sub(r"cmd=.*$", "cmd=<redacted>", newline)
-                    if newline != line:
-                        changed = True
-                # session=https://... -> session_key=<one-way fingerprint>
-                if 'session=' in newline:
-                    def repl(m):
-                        return 'session_key=' + (_session_key(m.group(1)) or '-')
-                    newline2 = re.sub(r"session=(https?://\S+)", repl, newline)
-                    if newline2 != newline:
-                        newline = newline2
-                        changed = True
-                out.append(newline)
-            if changed:
-                tmp = LOG_PATH + ".privacy.%d" % os.getpid()
-                with open(tmp, 'w', encoding='utf-8') as f:
-                    f.writelines(out)
-                os.replace(tmp, LOG_PATH)
-    except OSError:
-        pass
 
 
 def _compact_history_locked():
@@ -745,10 +648,6 @@ def run_exec(msg, cancel_event=None):
             "id": rid,
             "error": "Command too large (512KB per-command limit); rejected. Split it into smaller chunks, or send large files via the attach channel.",
         }
-    if cmd.strip() == "__diag__":
-        return run_diag(msg)
-    if cmd.strip() == "__ctx_summary__":
-        return ctx_summary.run(msg, HISTORY)
     try:
         timeout = int(msg.get("timeout") or DEFAULT_TIMEOUT)
     except (TypeError, ValueError):
@@ -870,7 +769,7 @@ def run_exec(msg, cancel_event=None):
     res["timeout"] = timeout
     res["approved"] = approved
     res["ts"] = int(time.time())
-    # slimmed store: metadata + output summary + session/ai only
+    # History entry: metadata and lengths only.
     HISTORY[hkey] = {
         "id": rid,
         "ok": res["ok"],
@@ -909,7 +808,7 @@ def run_read_file(msg):
     low = real.lower()
     for pat in FILE_DENY:
         if pat in low:
-            log("read_file DENY id=%s path=%r pattern=%s" % (rid, real, pat))
+            log("read_file DENY id=%s path_len=%d pattern=%s" % (rid, len(real), pat))
             return {"type": "error", "id": rid, "error": "refusing to read sensitive path"}
     try:
         size = os.path.getsize(real)
@@ -940,24 +839,24 @@ def run_read_file(msg):
             "total": total,
             "data": ch,
         })
-    log("read_file id=%s path=%r size=%d chunks=%d mime=%s" % (rid, real, size, total, mime))
+    log("read_file id=%s path_len=%d size=%d chunks=%d mime=%s" % (rid, len(real), size, total, mime))
     return out
 
 
 def _binding_ok(msg):
+    """Require a live lease and exact binding/session/AI match."""
     lease = _lease_read()
-    if not lease:
-        # Legacy callers do not send binding_id and may still use read_file /
-        # diag. A new-style request must have an active lease.
-        return not bool(msg.get("binding_id"))
-    if _lease_is_stale(lease):
+    if not lease or _lease_is_stale(lease):
         return False
     owner = _lease_owner(lease)
-    if (msg.get("binding_id") or "") != owner.get("binding_id"):
+    binding_id = msg.get("binding_id")
+    if not isinstance(binding_id, str) or not binding_id:
         return False
-    if msg.get("session") and msg.get("session") != owner.get("session"):
+    if binding_id != owner.get("binding_id"):
         return False
-    if msg.get("ai") and msg.get("ai") != owner.get("ai"):
+    if (msg.get("session") or "") != (owner.get("session") or ""):
+        return False
+    if (msg.get("ai") or "") != (owner.get("ai") or ""):
         return False
     return True
 
@@ -1091,27 +990,13 @@ def start_exec(msg):
     if not _target_ok(msg):
         return {"type": "error", "id": rid,
                 "error": "missing or mismatched host; command not executed"}
-    lease = _lease_read()
-    if not lease and msg.get("binding_id"):
+    if not _binding_ok(msg):
         return {"type": "error", "id": rid,
-                "error": "no active machine lease; reconnect the extension"}
-    if lease:
-        if _lease_is_stale(lease):
-            return {"type": "error", "id": rid,
-                    "error": "machine lease is stale; reconnect the extension"}
-        owner = _lease_owner(lease)
-        if not msg.get("binding_id") or msg.get("binding_id") != owner.get("binding_id"):
-            return {"type": "error", "id": rid,
-                    "error": "not the bound page for this machine"}
-        if msg.get("session") and msg.get("session") != owner.get("session"):
-            return {"type": "error", "id": rid,
-                    "error": "session mismatch with the bound page"}
-        if msg.get("ai") and msg.get("ai") != owner.get("ai"):
-            return {"type": "error", "id": rid,
-                    "error": "ai mismatch with the bound page"}
-        if lease.get("state") == "running":
-            return {"type": "error", "id": rid,
-                    "error": "host busy: %s" % (lease.get("task_id") or "?")}
+                "error": "not the bound page for this machine; reconnect the extension"}
+    lease = _lease_read()
+    if lease and lease.get("state") == "running":
+        return {"type": "error", "id": rid,
+                "error": "host busy: %s" % (lease.get("task_id") or "?")}
     with STATE_LOCK:
         if ACTIVE is not None:
             return {"type": "error", "id": rid,
@@ -1179,12 +1064,12 @@ def handle_connect(msg):
 
 def handle_disconnect(msg):
     global LEASE_BINDING
-    binding = msg.get("binding_id") or LEASE_BINDING or ""
+    binding = msg.get("binding_id") or ""
     if not binding:
         return {"type": "error", "id": msg.get("id"), "error": "missing binding_id"}
     with STATE_LOCK:
         active = ACTIVE
-    if active:
+    if active and binding == LEASE_BINDING:
         active["cancel"].set()
     ok = lease_release(binding)
     # Stop the heartbeat even if the lock was momentarily unavailable; a stale
@@ -1214,6 +1099,8 @@ def handle_status(msg):
 
 def handle_kill(msg):
     rid = msg.get("id")
+    if not _binding_ok(msg):
+        return {"type": "error", "id": rid, "error": "not the bound page for this machine"}
     with STATE_LOCK:
         active = ACTIVE
     if not active:
@@ -1223,7 +1110,7 @@ def handle_kill(msg):
                 "error": "running task is %s" % active.get("id")}
     active["cancel"].set()
     try:
-        lease_request_cancel(msg.get("binding_id") or LEASE_BINDING)
+        lease_request_cancel(msg.get("binding_id"))
     except Exception:
         pass
     return {"type": "progress", "id": active.get("id"),
@@ -1233,12 +1120,14 @@ def handle_kill(msg):
 
 def handle_cancel(msg):
     binding = msg.get("binding_id") or ""
+    if not binding:
+        return {"type": "error", "id": msg.get("id"), "error": "missing binding_id"}
     with STATE_LOCK:
         active = ACTIVE
-    if active and (not binding or binding == LEASE_BINDING):
+    if active and binding == LEASE_BINDING:
         active["cancel"].set()
         return {"type": "progress", "id": active.get("id"), "killing": True}
-    ok = bool(binding) and lease_request_cancel(binding, foreign=True)
+    ok = lease_request_cancel(binding, foreign=True)
     return {"type": "result", "id": msg.get("id"), "ok": ok,
             "exit_code": 0 if ok else 1,
             "stdout": "cancel requested" if ok else "no matching task/lease",
@@ -1327,8 +1216,6 @@ def main():
         sys.stderr.write("webai-claw: machine identity missing; run native-host/install.py\n")
         return 3
     HISTORY = load_history()
-    scrub_history_privacy()
-    scrub_log_privacy()
     BROWSER_ALIVE = True
     for sig in (signal.SIGTERM, signal.SIGINT, getattr(signal, "SIGHUP", None)):
         if sig is not None:

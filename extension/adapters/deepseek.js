@@ -106,7 +106,7 @@
       if (!el) return false;
       var label = (el.getAttribute && el.getAttribute('aria-label')) || '';
       var txt = (el.textContent || '').trim();
-      return /stop|abort|停止|中断|中止/i.test(label + ' ' + txt);
+      return /stop|abort/i.test(label + ' ' + txt);
     },
 
     isGenerating: function () {
@@ -120,7 +120,6 @@
 
     clickSend: function () {
       var sels = [
-        'button[aria-label*="发送"]',
         'button[aria-label*="Send"]',
         'button[type="submit"]'
       ];
