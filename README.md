@@ -73,8 +73,11 @@ machine UUID and exact `"v":3`.
 
 - **Auto-send command results** (default on): send command output back to the
   chat automatically.
-- **Auto-send attachments** (default off): send uploaded files automatically.
-  When off, attachments wait in the input box for you to press Send.
+- **Auto-send attachments** (default off): send AI-requested files automatically.
+  When off, those files wait in the input box for you to press Send.
+- The **Connect** handshake is always sent automatically because it is the
+  explicit action that establishes the connection; the two settings above do
+  not apply to it.
 - **Interrupt**, **Continue**, and **Stop** control the current run.
 - **Test Bridge** checks the Native Messaging connection.
 

@@ -111,6 +111,15 @@ function notifyWaiting(reason) {
   } catch (e) {}
 }
 
+function notifyConnectDone(ok, error) {
+  try {
+    getPort().postMessage({
+      type: 'connect_done', ok: !!ok, error: error || '',
+      binding_id: BINDING_ID, gen: gen
+    });
+  } catch (e) {}
+}
+
 function normalizeSession(v) {
   try {
     var u = new URL(v, location.href);
@@ -734,8 +743,15 @@ function setPauseStorage(on) {
 }
 
 function sendConnectAttachment(config) {
+  var finished = false;
+  function finish(ok, error) {
+    if (finished) return;
+    finished = true;
+    notifyConnectDone(ok, error);
+  }
   if (!adapter || typeof adapter.uploadFile !== 'function') {
     fillOnly('[connect] this site does not support file upload; cannot send the guide');
+    finish(false, 'this site does not support file upload');
     return;
   }
   var session = sessionKeyOf();
@@ -763,17 +779,23 @@ function sendConnectAttachment(config) {
   var text = lines.join('\n');
   var bytes;
   try { bytes = new TextEncoder().encode(text); }
-  catch (e) { fillOnly('[connect] failed to encode guide: ' + e.message); return; }
+  catch (e) {
+    fillOnly('[connect] failed to encode guide: ' + e.message);
+    finish(false, 'failed to encode guide');
+    return;
+  }
   var res;
   try {
     res = adapter.uploadFile({ name: 'webai-claw-connect.txt', mime: 'text/plain', bytes: bytes });
   } catch (e) {
     fillOnly('[connect] adapter upload threw: ' + e.message);
+    finish(false, 'adapter upload threw');
     return;
   }
   Promise.resolve(res).then(function (r) {
     if (!r || !r.ok) {
       fillOnly('[connect] guide upload failed: ' + ((r && r.why) || 'unknown'));
+      finish(false, (r && r.why) || 'guide upload failed');
       return;
     }
     var targetHost = config.machine_id || localMachineId || '?';
@@ -790,15 +812,24 @@ function sendConnectAttachment(config) {
       'Wait for the task.';
     var ok = false;
     try { ok = adapter.fillResult(note); } catch (e) { ok = false; }
-    if (!ok) { fillOnly('[connect] connected, but could not fill the input box'); return; }
+    if (!ok) {
+      fillOnly('[connect] connected, but could not fill the input box');
+      finish(false, 'could not fill the input box');
+      return;
+    }
+    // Connect is an explicit user action. Send the handshake regardless of the
+    // Auto-send command results and Auto-send attachments preferences; those
+    // settings apply to results and AI-requested files, not to the handshake.
     sendWithRetry({
       tag: 'connect', maxWaitMs: 25000, intervalMs: 500,
-      respectAuto: true, respectPause: false, countAuto: false,
-      onSkip: function () { notifyWaiting('connect-ready'); },
+      respectAuto: false, respectPause: false, countAuto: false,
+      onSent: function () { finish(true); },
+      onSkip: function (reason) { finish(false, 'handshake send failed: ' + (reason || 'unknown')); },
       failNote: '\n[webai-claw] Connect note is ready but auto-send failed; press Send manually.'
     });
   }, function (e) {
     fillOnly('[connect] adapter upload threw: ' + (e && e.message || e));
+    finish(false, 'adapter upload rejected');
   });
 }
 
@@ -1068,6 +1099,9 @@ function sendWithRetry(opts) {
           if (autoSentCount >= PAUSE_AFTER && !paused) pauseAutoSend('count');
         } else {
           console.log('[webai-claw] auto-sent ' + tag);
+        }
+        if (opts.onSent) {
+          try { opts.onSent(); } catch (e) {}
         }
         return;
       }

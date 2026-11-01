@@ -15,6 +15,7 @@ const pingTests = new Map(); // ping_test id -> {timer, sendResponse}
 const pagePorts = new Set();       // every live content-script port
 const pageInfo = new Map();        // pagePort -> {binding_id, session, ai, url, title, tabId}
 const hostRequests = new Map();    // one-shot host request id -> {cb, timer}
+const connectWaiters = new Map();  // pagePort -> {cb, host, binding_id, timer}
 let activeBinding = null;          // {binding_id, session, ai, port, tabId} for this browser
 const hostInfo = { machine_id: null, hostname: null, platform: null, shell: null, host_version: null };
 const LONG_TASK_BADGE_MS = 5000;
@@ -384,6 +385,9 @@ function ensureNativePort() {
     console.log("[webai-claw] native port disconnected:", chrome.runtime.lastError);
     const old = activeBinding;
     const oldSite = old ? siteOfUrl((pageInfo.get(old.port) || {}).url || old.session) : "";
+    for (const port of Array.from(connectWaiters.keys())) {
+      resolveConnect(port, false, "local host disconnected", false);
+    }
     nativePort = null;
     hostBusy = false;
     running = null;
@@ -506,6 +510,13 @@ chrome.runtime.onConnect.addListener((pagePort) => {
       }
       return;
     }
+    if (msg.type === "connect_done") {
+      const waiter = connectWaiters.get(pagePort);
+      if (waiter && (!msg.binding_id || msg.binding_id === waiter.binding_id)) {
+        resolveConnect(pagePort, !!msg.ok, msg.error || "");
+      }
+      return;
+    }
     if (msg.type === "waiting") {
       const info = pageInfo.get(pagePort) || {};
       if (activeBinding && activeBinding.port === pagePort) {
@@ -543,6 +554,9 @@ chrome.runtime.onConnect.addListener((pagePort) => {
     }
   });
   pagePort.onDisconnect.addListener(() => {
+    if (connectWaiters.has(pagePort)) {
+      resolveConnect(pagePort, false, "page closed during connect");
+    }
     for (const [id, entry] of pending) { if (entry.port === pagePort && (!running || running.id !== id)) pending.delete(id); }
     dropQueueForBinding(pagePort, null, "page closed; queued command discarded");
     if (activeBinding && activeBinding.port === pagePort) {
@@ -578,6 +592,35 @@ function findPageForTab(tabId) {
 }
 
 // ---------- popup bridge / connection control ----------
+function abortBinding(port, bindingId) {
+  const old = activeBinding;
+  if (!old || old.port !== port || old.binding_id !== bindingId) return;
+  activeBinding = null;
+  updateBadge();
+  dropQueueForBinding(old.port, old.binding_id, "connect handshake failed; queued command discarded");
+  try { old.port.postMessage({ type: "bound", bound: false }); } catch (e) {}
+  if (nativePort) {
+    try {
+      nativePort.postMessage({
+        type: "disconnect", id: "__connect_fail__" + Date.now(),
+        binding_id: old.binding_id
+      });
+    } catch (e) {}
+  }
+}
+
+function resolveConnect(port, ok, error, release) {
+  const waiter = connectWaiters.get(port);
+  if (!waiter) return;
+  connectWaiters.delete(port);
+  clearTimeout(waiter.timer);
+  if (!ok && release !== false) abortBinding(port, waiter.binding_id);
+  try {
+    waiter.cb(ok ? { ok: true, host: waiter.host }
+                 : { ok: false, error: error || "connect handshake failed", host: waiter.host });
+  } catch (e) {}
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return false;
 
@@ -662,6 +705,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             ai: activeBinding.ai,
             tabId: activeBinding.tabId
           } : null,
+          connecting: !!(found && connectWaiters.has(found.port)),
           running: running ? {
             id: running.id, cmd: running.cmd,
             session: running.session, startTime: running.startTime
@@ -675,6 +719,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "connect") {
     queryActiveTab().then((tab) => {
       const found = tab ? findPageForTab(tab.id) : null;
+      if (found && connectWaiters.has(found.port)) {
+        sendResponse({ ok: false, error: "connect is already in progress for this tab" });
+        return;
+      }
       if (!found || !found.info.binding_id || !found.info.session || !found.info.ai) {
         sendResponse({ ok: false, error: "this tab is not ready; refresh the AI chat and try again" });
         return;
@@ -711,12 +759,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           found.port.postMessage({ type: "bound", bound: true,
             session: info.session, ai: info.ai });
         } catch (e) {}
+        const waiter = {
+          cb: sendResponse,
+          host: res,
+          binding_id: info.binding_id,
+          timer: null
+        };
+        waiter.timer = setTimeout(function () {
+          resolveConnect(found.port, false,
+            "connect handshake timed out; check the chat input and click Connect again");
+        }, 45000);
+        connectWaiters.set(found.port, waiter);
         requestHost({
           type: "bundle", binding_id: info.binding_id,
           session: info.session, ai: info.ai
         }, (bundle) => {
           if (!bundle || bundle.type !== "bundle") {
-            sendResponse({ ok: false, error: (bundle && bundle.error) || "failed to read guide" });
+            resolveConnect(found.port, false,
+              (bundle && bundle.error) || "failed to read guide");
             return;
           }
           try {
@@ -724,8 +784,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               type: "do_connect",
               config: Object.assign({}, bundle, { session: info.session, ai: info.ai })
             });
-          } catch (e) {}
-          sendResponse({ ok: true, host: res });
+          } catch (e) {
+            resolveConnect(found.port, false, "could not reach the chat page");
+          }
         }, 10000);
       }, 10000);
     });
@@ -738,6 +799,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     }
     const old = activeBinding;
+    for (const [port, waiter] of connectWaiters) {
+      if (waiter.binding_id === old.binding_id) {
+        resolveConnect(port, false, "disconnected", false);
+      }
+    }
     activeBinding = null;
     updateBadge();
     dropQueueForBinding(old.port, old.binding_id, "disconnected; queued command discarded");

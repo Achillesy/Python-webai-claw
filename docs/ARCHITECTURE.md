@@ -99,7 +99,9 @@ entry, and a host permission for that site. Supported sites in this release:
 - Auto-send pauses after 10 consecutive sends and enforces a two-second minimum
   interval and a 20-per-minute limit.
 - `Auto-send command results` defaults on. `Auto-send attachments` defaults off.
-  The popup setting is authoritative.
+  The popup setting is authoritative for results and AI-requested files. The
+  Connect handshake is always sent automatically; the popup shows a connecting
+  state until the handshake note is sent.
 - The toolbar badge is global: blank when not connected, `✓` when connected, and
   `...` when a native-host command has run for 5 seconds. Errors are shown in
   the page and popup, not as a badge.

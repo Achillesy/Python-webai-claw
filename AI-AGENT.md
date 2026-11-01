@@ -148,7 +148,8 @@ attachment. This is preferable to `cat` for large or binary files.
 - The host refuses sensitive paths such as `.ssh`, `.aws`, `.env`, private keys,
   and browser cookies.
 - Attachment auto-send is controlled by the user's popup option
-  **Auto-send attachments**. It is off by default.
+  **Auto-send attachments**. It is off by default and applies to AI-requested
+  `attach` files. The Connect handshake itself is always sent automatically.
 - Do not write a `send` field. It is not part of v3 and is ignored.
 - If auto-send is off, the attachment waits in the input box for the user to
   press Send. Do not resend the same attachment repeatedly.

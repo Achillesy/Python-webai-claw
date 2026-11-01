@@ -3,6 +3,24 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.1] - 2026-11-01
+
+### Fixed
+
+- Connect is now a forced handshake: the extension always auto-sends the
+  `AI-AGENT.md` attachment and connection note, independent of the
+  `Auto-send command results` and `Auto-send attachments` preferences. Those
+  preferences apply only to command results and AI-requested files.
+- The popup shows `connecting (sending handshake)` until the content script
+  confirms the handshake was sent. It no longer reports connected while the
+  Connect attachment is still waiting in the input box.
+- A failed or timed-out handshake releases the binding and returns a clear
+  error instead of leaving a false connected state.
+
+### Versions
+
+- Extension and host bumped to 1.1.1.
+
 ## [1.1.0] - 2026-11-01
 
 ### Changed

@@ -65,7 +65,9 @@ controlled only by the user's popup setting.
    then requests `{type:"bundle"}` from the host.
 6. The host returns `AI-AGENT.md` plus `handoff.md`. The extension uploads them
    as `webai-claw-connect.txt` and fills a short note containing `host:<UUID>`.
-7. If auto-send is on, the note is sent; otherwise the user sends it.
+7. The Connect note is always sent automatically; this handshake is not
+   controlled by the auto-send result or attachment preferences. The popup
+   reports connected only after the note has been sent.
 8. The AI replies in normal text:
    > Connected to `<hostname>` (`<platform>`). I will run subsequent commands
    > on this machine with `host:<UUID>`.

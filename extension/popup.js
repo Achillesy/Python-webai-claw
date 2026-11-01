@@ -91,6 +91,9 @@ function render(st) {
   if (!hostOk) {
     els.state.textContent = 'host unavailable';
     els.state.className = 'err';
+  } else if (st.connecting) {
+    els.state.textContent = 'connecting (sending handshake)';
+    els.state.className = 'warn';
   } else if (state === 'idle') {
     els.state.textContent = 'idle (this machine is free)';
     els.state.className = 'ok';
@@ -103,7 +106,9 @@ function render(st) {
   }
 
   var lines = [];
-  if (lease && state !== 'idle') {
+  if (st.connecting) {
+    lines.push('The connection handshake is being sent. Connect completes only after the note is sent.');
+  } else if (lease && state !== 'idle') {
     lines.push('owner: ' + fmtOwner(owner));
     if (lease.task_id) {
       lines.push('task: ' + lease.task_id +
@@ -123,11 +128,12 @@ function render(st) {
   els.detail.textContent = lines.join('\n');
 
   var ownActive = !!(active && tab && active.binding_id === tab.binding_id);
-  var canConnect = hostOk && tab && tab.supported && !!tab.binding_id && !!tab.session && !!tab.ai &&
+  var canConnect = hostOk && !st.connecting && tab && tab.supported &&
+    !!tab.binding_id && !!tab.session && !!tab.ai &&
     (!lease || state === 'idle' || stale || !owner);
   els.connect.hidden = false;
   els.connect.disabled = !canConnect;
-  els.connect.textContent = stale ? 'Clean up & Connect' : 'Connect';
+  els.connect.textContent = st.connecting ? 'Connecting…' : (stale ? 'Clean up & Connect' : 'Connect');
   els.disconnect.hidden = !ownActive;
   els.interrupt.hidden = !(ownActive && state === 'running');
   els.cont.hidden = !paused;
@@ -171,8 +177,7 @@ els.connect.addEventListener('click', function () {
       refresh();
       return;
     }
-    els.detail.textContent = 'Connected. The guide and local config were attached to the chat; ' +
-      'the message was sent if auto-send is on.';
+    els.detail.textContent = 'Connected. The guide and local configuration were attached and sent.';
     refresh();
   });
 });
