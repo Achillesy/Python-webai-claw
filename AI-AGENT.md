@@ -132,6 +132,20 @@ git status --short
 - 单文件上限 25MB。
 - 敏感路径（`.ssh`、`.aws`、`.env`、密钥、cookie 等）host 会拒绝。
 - 不要用 `send:true` 批量传文件；每个文件会单独发一条消息，刷屏。
+- `send:true` 仍受用户 popup 的“自动发送”总开关控制；不是强制发送。
+- 附件会消耗对话上下文；大文件或连续多个附件后，DeepSeek 应考虑 summary 交接。
+
+站点附件限制（沿用 webai-hands 实测结论）：
+
+| 站点 | 限制 |
+|---|---|
+| DeepSeek | 不收压缩包（zip/rar/7z/tar/gz/bz2/xz/tgz/cab 等），适配器会先拒绝；其他类型跟随页面 `input[type=file]` 的 `accept`，txt 已实测可传 |
+| Muse | 无已知类型限制；实测 txt/zip/rar/exe/7z 可传，10MB 文件通过 |
+| 通用 | host 单文件上限 25MB；敏感路径直接拒绝 |
+
+- DeepSeek 不要传压缩包，先在本机解压再传内部文件。
+- Muse 的 10MB 是已验证值；25MB 只是 host 上限，不代表 Muse 一定接受。
+- 文件一旦上传就离开本机；敏感文件不要传。
 
 ### 2.4 diag
 
@@ -165,6 +179,16 @@ git status --short
 ```
 
 host 会把 body 写到 `~/.webai-claw/handoff.md`。用户下一次点“连接”时，扩展会把这份总结连同本手册、本机配置一起作为附件发给你。
+
+summary 成功后，扩展会回填：
+
+```text
+[claw:summary] id=... ok=true
+handoff: ~/.webai-claw/handoff.md
+Next: open a new chat and click Connect; the attachment will include handoff.md.
+```
+
+看到这个结果后，用普通文字提醒用户新开对话并点 Connect，不要继续执行新命令。
 
 写 summary 的时机：
 
@@ -230,6 +254,18 @@ host 会把 body 写到 `~/.webai-claw/handoff.md`。用户下一次点“连接
 
 AI 停下等用户把结果贴回来；不要继续发命令，也不要自己猜结果。
 
+### 4.4 DeepSeek 上下文交接（仅 DeepSeek）
+
+DeepSeek 的上下文限制由 DeepSeek 自己判断。接近限制时：
+
+- 不再发 exec/attach；
+- 发一个 `summary` 块（仍需 `host` 和 `v:3`）；
+- host 写 `handoff.md`，扩展回填 `[claw:summary]`；
+- 告诉用户新开对话并点 Connect；
+- 旧对话停止执行。
+
+Muse 不需要这条规则；不要主动打断 Muse 的长对话。
+
 ## 5. 如何读结果
 
 结果以纯文本回到对话，首行有固定前缀：
@@ -278,21 +314,41 @@ Downloads
 
 - 看到 `[claw:paused]` 后：**停止发新命令**，等用户点“继续”或“停止”。
 - 用户点“继续”后再按新指令执行；点“停止”则中止当前链。
+- 扩展还会限制自动发送节奏：默认至少间隔 2 秒，最多 20 条/分钟；触发后同样会发 `[claw:paused]`。
+- 如果当前是 DeepSeek 且确实需要交接，仍可以发一个 `summary` 块；扩展在暂停状态下只放行 summary。
 
 ## 7. 会话太长：交接给下一个对话
 
-当上下文快满或用户要换新对话：
+### 7.1 DeepSeek：由 AI 自己判断并主动交接
 
-1. 发一个 `summary` 块，写清楚：
+DeepSeek 有上下文长度限制。出现以下任一情况时，**不要等扩展拦截**：
+
+- 页面提示上下文将满；
+- 同一任务连续 3+ 次调用没有进展；
+- 一个阶段完成，准备交棒；
+- 对话已经很长，继续执行风险高。
+
+动作：
+
+1. 立即停止发 exec/attach 命令；
+2. 发一个 `summary` 块，写清楚：
    - 已完成什么；
    - 当前状态；
    - 下一步；
    - 关键结论/坑；
    - 已执行的关键命令；
    - 待确认问题。
-2. 告诉用户：
+3. host 写入 `handoff.md`，扩展回填 `[claw:summary]`；
+4. 用普通文字告诉用户：
    > 请新开一个对话，点扩展 popup 的“连接”。扩展会把本手册、本机配置和这份总结一起发给我。
-3. 新对话里，从总结的“下一步”继续。
+5. 新对话里，从总结的“下一步”继续；
+6. 旧对话不要再发新命令。
+
+### 7.2 Muse
+
+Muse 不做强制交接。只在用户明确要求换对话，或任务阶段需要存档时使用 summary；不要因为对话变长而自行打断。
+
+### 7.3 通用
 
 不要试图把整段对话复制到新对话；用 summary 交接。
 
@@ -321,6 +377,8 @@ Downloads
 - **提示 missing/invalid host**：扩展回填了本机 `host=<UUID>`；用这个 UUID 重发，并换新 `id`。
 - **两台机器都连着**：AI 应在回复中写明当前使用的 `host`。用户指定另一台时，换成用户给的 UUID；只有 `host` 匹配的机器执行。
 - **结果没回来**：检查用户是否切换了页面/tab；连接是否被另一个浏览器占用；host 是否在运行。
+- **上下文快满（DeepSeek）**：停止命令，发 `summary`，然后提醒用户新开对话并 Connect；不要继续硬撑。
+- **附件停在输入框**：扩展会等上传和发送按钮（最多约 45 秒）；仍失败时请用户手动点发送，不要连续重发同一个 attach。
 - **命令被截断**：块尽量短；大文件分段 `>>` 追加；不要在三连反引号里再放三连反引号。
 - **Windows/macOS 语法混了**：看连接附件里的 `platform` / `shell`，以及当前 `host`。
 - **提示 host busy**：本机有另一个任务在跑；让用户选择中断或等待。

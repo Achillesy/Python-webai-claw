@@ -3,6 +3,29 @@
   'use strict';
   var reg = (window.__webaiClawAdapters = window.__webaiClawAdapters || {});
 
+  function acceptAllows(input, name, mime) {
+    var accept = (input.getAttribute('accept') || '').trim();
+    if (!accept) return true;
+    var m = /\.([a-z0-9]+)$/i.exec(name || '');
+    var ext = m ? m[1].toLowerCase() : '';
+    var parts = accept.split(',');
+    for (var i = 0; i < parts.length; i++) {
+      var tok = parts[i].trim().toLowerCase();
+      if (!tok) continue;
+      if (tok === '*' || tok === '*/*') return true;
+      if (tok.charAt(0) === '.') {
+        if (ext && tok === '.' + ext) return true;
+      } else if (tok.indexOf('/') !== -1) {
+        var mt = (mime || '').toLowerCase();
+        if (tok.slice(-2) === '/*' && mt.indexOf(tok.slice(0, -1)) === 0) return true;
+        if (mt && tok === mt) return true;
+      } else if (ext && tok === ext) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   reg['chat.deepseek.com'] = {
     name: 'deepseek',
     ai: 'deepseek',
@@ -44,6 +67,10 @@
       var inputs = document.querySelectorAll('input[type=file]');
       if (!inputs.length) return { ok: false, why: 'page has no input[type=file]' };
       var input = inputs[0];
+      if (!acceptAllows(input, name, file.mime)) {
+        return { ok: false, why: 'DeepSeek input does not accept this file type (accept=' +
+          (input.getAttribute('accept') || '') + ')' };
+      }
       var blob, f;
       try {
         blob = new Blob([file.bytes], { type: file.mime || 'application/octet-stream' });
@@ -80,6 +107,15 @@
       var label = (el.getAttribute && el.getAttribute('aria-label')) || '';
       var txt = (el.textContent || '').trim();
       return /stop|abort|停止|中断|中止/i.test(label + ' ' + txt);
+    },
+
+    isGenerating: function () {
+      var btns = document.querySelectorAll('button, [role="button"]');
+      for (var i = 0; i < btns.length; i++) {
+        var b = btns[i];
+        if (b && b.offsetParent !== null && this.isStopButton(b)) return true;
+      }
+      return false;
     },
 
     clickSend: function () {

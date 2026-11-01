@@ -2,6 +2,29 @@
 
 All notable changes to webai-claw. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.2] - 2026-11-01
+
+### Fixed
+- attach auto-send now waits for upload/send-button readiness instead of a
+  single 500ms attempt. It respects the auto-send switch, the pause state, and
+  counts toward the 10-send pause.
+- Connect attachment and pause/stop/warning notices use the same retry path.
+- `maybeAutoSend` no longer sends late results after the chain is paused.
+- DeepSeek attachment uploads pre-check `input.accept` in addition to the
+  existing archive rejection.
+
+### Changed
+- Unified auto-send through `sendWithRetry` with per-tag timeouts, 2s minimum
+  spacing, a 20/min burst guard, and optional `isGenerating`/`isUploading`
+  adapter hooks.
+- `summary` is allowed while paused and returns `[claw:summary]` with the
+  handoff path plus a new-chat reminder.
+- AI-AGENT.md documents DeepSeek-only AI-driven context handoff, Muse's
+  no-forced-handoff behavior, and the verified webai-hands attachment limits.
+
+### Versions
+- Extension and host bumped to 0.2.2.
+
 ## [0.2.1] - 2026-11-01
 
 ### Fixed

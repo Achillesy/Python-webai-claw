@@ -32,7 +32,7 @@ import uuid
 import ctx_summary
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "0.2.1"
+HOST_VERSION = "0.2.2"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
@@ -1032,9 +1032,11 @@ def run_summary(msg):
     log("summary id=%s bytes=%d -> %s" % (
         rid, len(text.encode("utf-8", "ignore")), HANDOFF_PATH))
     return {
-        "type": "result", "id": rid, "hostname": socket.gethostname(),
+        "type": "result", "kind": "summary", "id": rid,
+        "hostname": socket.gethostname(),
         "platform": sys.platform, "machine_id": MACHINE_ID,
         "session": msg.get("session") or "", "ai": msg.get("ai") or "",
+        "handoff": HANDOFF_PATH,
         "ok": True, "exit_code": 0,
         "stdout": "summary written to %s" % HANDOFF_PATH,
         "stderr": "", "duration_ms": 0, "ts": int(time.time()),
