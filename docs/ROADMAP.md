@@ -41,7 +41,7 @@
   reinstall and prompt for a browser restart.
 - [ ] **Data-driven extension-ID allowlist.** Read IDs from
   `native-host/extension_ids.json` instead of hardcoding; single store entry
-  reuses the file's GitHub/Gitee mirror fallback.
+  reuses the file's GitHub fallback.
 
 ## Parked
 

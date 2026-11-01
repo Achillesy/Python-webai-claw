@@ -42,11 +42,8 @@ HOST_FILES = ["host.py", "host.sh", "host.bat", "ctx_summary.py",
 # AI operator guides live at the repo root, not under native-host/.
 DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md"]
 # Where to fetch the host program when install.py is downloaded standalone
-# (one-line install). Pinned to main; change to a tag if you need a fixed version.
-# GitHub is tried first, then the Gitee mirror (for users in China where
-# GitHub raw is slow or blocked).
+# (one-line install). Pinned to master; change to a tag if you need a fixed version.
 HOST_BASE_URL = "https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host"
-HOST_MIRROR_URL = "https://gitee.com/achillesy/Python-webai-claw/raw/master/native-host"
 MACHINE_ID_PATH = os.path.join(INSTALL_DIR, "machine.json")
 
 SKILL_README = """\
@@ -77,45 +74,43 @@ def _download(url, dst, timeout=20):
 
 
 def _working_base():
-    """Return the first reachable host-file base (GitHub, then Gitee mirror)."""
+    """Return the reachable host-file base (GitHub)."""
     import urllib.request
     probe = "/host.bat"  # smallest file, fast probe
-    for base in (HOST_BASE_URL, HOST_MIRROR_URL):
-        try:
-            with urllib.request.urlopen(base + probe, timeout=8) as r:
-                r.read(1)
-            return base
-        except Exception:
-            continue
-    return None
+    try:
+        with urllib.request.urlopen(HOST_BASE_URL + probe, timeout=8) as r:
+            r.read(1)
+        return HOST_BASE_URL
+    except Exception:
+        return None
 
 
 def _net_base_or_raise():
     base = _working_base()
     if base is None:
-        raise RuntimeError("Cannot reach GitHub or Gitee. Check your network/proxy.")
+        raise RuntimeError("Cannot reach GitHub. Check your network/proxy.")
     return base
 
 
-def _download_one(name, base, mirrors):
-    """Download one file into INSTALL_DIR, trying base then mirrors."""
+def _download_one(name, base, mirrors=None):
+    """Download one file into INSTALL_DIR from base (mirrors optional)."""
     dst = os.path.join(INSTALL_DIR, name)
-    for b in [base] + mirrors:
+    for b in [base] + list(mirrors or []):
         url = "%s/%s" % (b, name)
         try:
             print("Downloading %s" % url)
             _download(url, dst)
             return
         except Exception as e:
-            print("  failed (%s), trying next mirror..." % e)
-    raise RuntimeError("Failed to download %s from GitHub and Gitee" % name)
+            print("  failed (%s)" % e)
+    raise RuntimeError("Failed to download %s from GitHub" % name)
 
 
 def fetch_files():
     # Two modes:
     # - Source mode: host files sit next to install.py (git checkout) -> copy.
     # - Standalone mode: install.py was downloaded alone (one-line install)
-    #   -> fetch the host files from GitHub, falling back to the Gitee mirror.
+    #   -> fetch the host files from GitHub.
     net_base = None
     if HERE and all(os.path.exists(os.path.join(HERE, n)) for n in HOST_FILES):
         for name in HOST_FILES:
@@ -124,9 +119,8 @@ def fetch_files():
     else:
         net_base = _net_base_or_raise()
         print("Using host file source: %s" % net_base)
-        mirrors = [b for b in (HOST_BASE_URL, HOST_MIRROR_URL) if b != net_base]
         for name in HOST_FILES:
-            _download_one(name, net_base, mirrors)
+            _download_one(name, net_base)
         print("Downloaded host files.")
     # AI operator guides (AI-AGENT.md / AI-BLENDER.md): they live at the repo
     # root, not under native-host/. Store users have no checkout, so ship them
@@ -144,12 +138,8 @@ def fetch_files():
             net_base = _net_base_or_raise()
         suffix = "/native-host"
         doc_base = net_base[:-len(suffix)] if net_base.endswith(suffix) else net_base
-        doc_mirrors = [
-            b[:-len(suffix)] if b.endswith(suffix) else b
-            for b in (HOST_BASE_URL, HOST_MIRROR_URL) if b != net_base
-        ]
         for name in DOC_FILES:
-            _download_one(name, doc_base, doc_mirrors)
+            _download_one(name, doc_base)
         print("Downloaded AI guides.")
 
 
