@@ -73,9 +73,12 @@ Optional `exec` fields:
    same chat opened on Windows), the AI restates the newest `host`. The user
    may name another UUID to switch back.
 
-Muse new chats start at `/thread/new` (or the bare origin) and get a real
-`/thread/<uuid>` after the first message. The extension adopts that real
-session for the same `binding_id` instead of disconnecting.
+New chats do not always have a session id at Connect time. The extension
+treats the placeholder URL as provisional and adopts the first real session
+for the same `binding_id` instead of disconnecting:
+
+- Muse `/thread/new` (or the bare origin) -> `/thread/<uuid>`;
+- DeepSeek bare origin or `/a/chat` -> `/a/chat/s/<uuid>`.
 
 `binding_id` is a random per-page value, not the URL. Tabs and browsers with
 the same URL therefore cannot steal the lease. Session URL and AI type are

@@ -138,9 +138,15 @@ function sameOrigin(a, b) {
 function isProvisionalSession(s) {
   try {
     var u = new URL(s);
+    var p = u.pathname.replace(/\/+$/, '');
     if (u.hostname === 'muse.ai') {
-      var p = u.pathname.replace(/\/+$/, '');
       return p === '' || p === '/thread/new' || p === '/new';
+    }
+    if (u.hostname === 'chat.deepseek.com') {
+      // A real DeepSeek chat is /a/chat/s/<uuid>. The new-chat page is the
+      // bare origin or /a/chat (no session id yet); adopt the first real id.
+      var m = /^(\/a)?\/chat\/s\/([^/]+)$/.exec(p);
+      return !m || m[2] === 'new';
     }
   } catch (e) {}
   return false;

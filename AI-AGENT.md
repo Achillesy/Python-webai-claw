@@ -21,6 +21,8 @@
 
 然后等待用户提出任务。
 
+新开的对话可能在你点 Connect 时还没有 session id（例如 DeepSeek 的 `https://chat.deepseek.com`、Muse 的 `/thread/new`）。扩展会在第一条消息生成真实 session 后自动接管，不需要重新 Connect。
+
 ### 0.1 多台机器连接同一个对话
 
 同一个 web AI 对话可能同时在 Mac 和 Windows 上打开。每台机器点 Connect 都会发一份新的附件，里面有各自的 `host` UUID。

@@ -85,9 +85,10 @@ Currently wired: `muse.ai`, `chat.deepseek.com`
 - Every AI command carries a target `host` UUID from the latest Connect
   attachment. Only the matching machine executes; other connected machines
   ignore the block.
-- Muse new chats (`/thread/new` or the bare origin) may gain a real
-  `/thread/<uuid>` after the first message; the same `binding_id` adopts the
-  real session instead of disconnecting.
+- New chats may not have a session id at Connect time. Muse
+  `/thread/new` (or the bare origin) gains `/thread/<uuid>`, and DeepSeek
+  bare origin or `/a/chat` gains `/a/chat/s/<uuid>`; the same `binding_id`
+  adopts the real session instead of disconnecting.
 - Only the bound page may execute. Other tabs/browsers on the same machine
   (even with the same URL) get `busy` and are told to go to the owner.
 - A stale lease (dead host PID, browser gone, heartbeat older than 30s) is

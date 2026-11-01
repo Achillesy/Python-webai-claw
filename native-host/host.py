@@ -1058,6 +1058,10 @@ def handle_connect(msg):
                            msg.get("extension_id") or "")
     if result.get("ok"):
         LEASE_BINDING = binding
+        log("connect binding=%s session=%s ai=%s%s%s" % (
+            binding, msg.get("session") or "", msg.get("ai") or "",
+            " refreshed" if result.get("refreshed") else "",
+            " took_over_stale" if result.get("took_over_stale") else ""))
         return {
             "type": "connected",
             "id": msg.get("id"),
@@ -1071,6 +1075,10 @@ def handle_connect(msg):
             "ai": msg.get("ai") or "",
             "took_over_stale": bool(result.get("took_over_stale")),
         }
+    owner = result.get("owner") or {}
+    log("connect busy binding=%s session=%s owner_binding=%s state=%s" % (
+        binding, msg.get("session") or "", owner.get("binding_id") or "",
+        result.get("state") or ""))
     return {"type": "busy", "id": msg.get("id"), **result}
 
 
@@ -1089,6 +1097,7 @@ def handle_disconnect(msg):
     # let a wrong binding silence the real owner's heartbeat.
     if ok or binding == LEASE_BINDING:
         LEASE_BINDING = None
+    log("disconnect binding=%s ok=%s" % (binding, "1" if ok else "0"))
     return {"type": "result", "id": msg.get("id"), "ok": ok,
             "exit_code": 0 if ok else 1,
             "stdout": "disconnected" if ok else "not the lease owner",
