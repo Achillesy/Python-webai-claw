@@ -79,7 +79,7 @@ machine UUID and exact `"v":3`.
   explicit action that establishes the connection; the two settings above do
   not apply to it.
 - **Interrupt**, **Continue**, and **Stop** control the current run.
-- **Test Bridge** checks the Native Messaging connection.
+- **Advanced** contains the machine UUID (for multi-machine switching) and **Test Bridge** diagnostics.
 
 The toolbar badge is intentionally minimal:
 

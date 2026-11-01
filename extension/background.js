@@ -688,6 +688,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({
           ok: !!(st && !st.error),
           error: st && st.error,
+          machine_id: hostInfo.machine_id || null,
           host: Object.assign({}, hostInfo),
           lease: (st && st.lease) || null,
           tab: tab ? {

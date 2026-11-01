@@ -733,11 +733,12 @@ function onFileArrived(msg) {
 }
 
 
-function setPauseStorage(on) {
+function setPauseStorage(on, reason) {
   try {
     var obj = {};
     obj.mh_paused = !!on;
     obj.mh_pause_count = on ? autoSentCount : 0;
+    obj.mh_pause_reason = on ? (reason || '') : '';
     chrome.storage.local.set(obj);
   } catch (e) {}
 }
@@ -1015,7 +1016,7 @@ function doClickSend() {
 function pauseAutoSend(kind) {
   if (paused) return;
   paused = true;
-  setPauseStorage(true);
+  setPauseStorage(true, kind);
   notifyWaiting('paused');
   var note;
   if (kind === 'rate') {

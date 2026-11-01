@@ -3,6 +3,25 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.3] - 2026-11-01
+
+### Changed
+
+- Popup reduced to a compact status/action panel: Host, State, contextual
+  detail, relevant actions, two auto-send preferences, and an collapsed
+  Advanced section.
+- State text now carries the status color; the badge legend and static
+  pause/attachment explanations were removed.
+- Continue/Stop appear only while paused. Pause detail distinguishes the
+  ten-send limit from the per-minute rate limit via `mh_pause_reason`.
+- Machine ID and Test Bridge moved into Advanced. Machine ID is populated from
+  host status/connect state and no longer depends on running Test Bridge.
+- Connect/Disconnect/Interrupt are shown only when relevant.
+
+### Versions
+
+- Extension and host bumped to 1.1.3.
+
 ## [1.1.2] - 2026-11-01
 
 ### Fixed

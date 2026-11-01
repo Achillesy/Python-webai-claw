@@ -13,34 +13,52 @@
   .warn { color: #b26a00; }
   .err { color: #c62828; }
   .detail { white-space: pre-wrap; word-break: break-word; }
+  .detail:empty { display: none; }
+  details { margin: 10px 0 6px; }
+  summary { cursor: pointer; color: #555; font-size: 12px; }
+  .advanced { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e5e5; }
+  #mid { word-break: break-all; }
 </style>
 </head>
 <body>
   <h1>webai-claw <span id="ver" class="mut" style="font-weight:normal"></span></h1>
+
   <div class="row">Host: <span id="host">checking…</span></div>
-  <div class="row">State: <span id="state">checking…</span></div>
-  <div class="row mut detail" id="detail"></div>
+  <div class="row">State: <span id="state" aria-live="polite">checking…</span></div>
+  <div class="row mut detail" id="detail" aria-live="polite"></div>
+
   <div class="row">
-    <button id="connect" disabled>Connect</button>
+    <button id="connect" disabled title="Send AI-AGENT.md and this machine's configuration to the chat">Connect</button>
     <button id="disconnect" hidden>Disconnect</button>
     <button id="interrupt" hidden>Interrupt</button>
-  </div>
-  <div class="row">
     <button id="continue" hidden>Continue</button>
     <button id="stop" hidden>Stop</button>
   </div>
-  <label class="row" style="display:block">
+
+  <label class="row" style="display:block"
+         title="Results are filled into the input box. When on, they are sent automatically.">
     <input type="checkbox" id="autosend" checked> Auto-send command results
   </label>
-  <label class="row" style="display:block">
+  <label class="row" style="display:block"
+         title="When off, AI-requested attachments stay in the input box until you press Send.">
     <input type="checkbox" id="attachauto"> Auto-send attachments
   </label>
-  <div class="mut">AI-requested attachments are off by default. When off, they wait in the input box for you to press Send. The Connect handshake is always sent.</div>
-  <div class="mut">After 10 consecutive automatic sends the extension pauses and asks Continue/Stop.</div>
-  <div class="row mut">Badge: ✓ connected · ... waiting for native host · no mark: not connected</div>
-  <div class="row">Machine ID: <span id="mid" class="mut">unknown</span> <button id="copymid">Copy UUID</button></div>
-  <div class="row"><button id="ping">Test Bridge</button></div>
-  <div class="row mut">Useful? Buy the author a coffee: <a href="https://ko-fi.com/achillesy" target="_blank">Ko-fi</a> · <a href="https://paypal.me/achillesnewman" target="_blank">PayPal</a></div>
+
+  <details>
+    <summary>Advanced</summary>
+    <div class="advanced">
+      <div class="row">Machine ID: <span id="mid" class="mut">unavailable</span>
+        <button id="copymid" disabled>Copy UUID</button>
+      </div>
+      <div class="row"><button id="ping">Test Bridge</button></div>
+    </div>
+  </details>
+
+  <div class="row mut">Useful? Buy the author a coffee:
+    <a href="https://ko-fi.com/achillesy" target="_blank">Ko-fi</a> ·
+    <a href="https://paypal.me/achillesnewman" target="_blank">PayPal</a>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
