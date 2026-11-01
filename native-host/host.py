@@ -30,7 +30,7 @@ import time
 import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "1.1.1"
+HOST_VERSION = "1.1.2"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")

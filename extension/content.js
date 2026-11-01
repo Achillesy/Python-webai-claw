@@ -821,7 +821,7 @@ function sendConnectAttachment(config) {
     // Auto-send command results and Auto-send attachments preferences; those
     // settings apply to results and AI-requested files, not to the handshake.
     sendWithRetry({
-      tag: 'connect', maxWaitMs: 25000, intervalMs: 500,
+      tag: 'connect', maxWaitMs: 45000, intervalMs: 500,
       respectAuto: false, respectPause: false, countAuto: false,
       onSent: function () { finish(true); },
       onSkip: function (reason) { finish(false, 'handshake send failed: ' + (reason || 'unknown')); },

@@ -7,6 +7,16 @@
   'use strict';
   var reg = (window.__webaiClawAdapters = window.__webaiClawAdapters || {});
 
+  function isVisible(el) {
+    if (!el) return false;
+    try {
+      if (el.getClientRects) return el.getClientRects().length > 0;
+      return el.offsetParent !== null;
+    } catch (e) {
+      return false;
+    }
+  }
+
   reg['muse.ai'] = {
     name: 'muse',
     ai: 'muse',
@@ -96,19 +106,37 @@
     },
 
     clickSend: function () {
+      // Localized DOM labels are included as Unicode escapes. They are site
+      // selectors, not user-facing copy.
       var sels = [
         'button[data-testid="send-button"]',
         'button[aria-label*="Send"]',
+        'button[aria-label*="\u53d1\u9001"]',
         'button[type="submit"]'
       ];
       for (var i = 0; i < sels.length; i++) {
         var btns = document.querySelectorAll(sels[i]);
         for (var j = btns.length - 1; j >= 0; j--) {
           var b = btns[j];
-          if (b && !b.disabled && b.offsetParent !== null) {
+          if (b && !b.disabled && isVisible(b)) {
             b.click();
             return true;
           }
+        }
+      }
+      // Some localized layouts expose the send control only through its
+      // accessible label or visible text. Use the last visible send-like
+      // button, while avoiding disabled controls.
+      var all = document.querySelectorAll('button, [role="button"]');
+      for (var k = all.length - 1; k >= 0; k--) {
+        var candidate = all[k];
+        if (!candidate || candidate.disabled || !isVisible(candidate)) continue;
+        var label = ((candidate.getAttribute('aria-label') || '') + ' ' +
+          (candidate.getAttribute('title') || '') + ' ' +
+          (candidate.textContent || '')).toLowerCase();
+        if (label.indexOf('send') !== -1 || label.indexOf('\u53d1\u9001') !== -1) {
+          candidate.click();
+          return true;
         }
       }
       return false;

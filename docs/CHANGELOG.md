@@ -3,6 +3,22 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.2] - 2026-11-01
+
+### Fixed
+
+- Restored localized send-button selectors for DeepSeek and Muse as Unicode
+  escapes, added a visible-label/text fallback for alternate layouts, and
+  replaced offsetParent visibility checks with getClientRects so fixed-position
+  composer buttons are detected.
+- Connect now retries the handshake send for up to 45 seconds, covering slower
+  attachment uploads. This fixes the case where the attachment remained in the
+  input box until the previous 25-second retry window expired.
+
+### Versions
+
+- Extension and host bumped to 1.1.2.
+
 ## [1.1.1] - 2026-11-01
 
 ### Fixed

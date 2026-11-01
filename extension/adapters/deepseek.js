@@ -3,6 +3,16 @@
   'use strict';
   var reg = (window.__webaiClawAdapters = window.__webaiClawAdapters || {});
 
+  function isVisible(el) {
+    if (!el) return false;
+    try {
+      if (el.getClientRects) return el.getClientRects().length > 0;
+      return el.offsetParent !== null;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function acceptAllows(input, name, mime) {
     var accept = (input.getAttribute('accept') || '').trim();
     if (!accept) return true;
@@ -106,31 +116,49 @@
       if (!el) return false;
       var label = (el.getAttribute && el.getAttribute('aria-label')) || '';
       var txt = (el.textContent || '').trim();
-      return /stop|abort/i.test(label + ' ' + txt);
+      return /stop|abort|\u505c\u6b62|\u4e2d\u65ad|\u4e2d\u6b62/i.test(label + ' ' + txt);
     },
 
     isGenerating: function () {
       var btns = document.querySelectorAll('button, [role="button"]');
       for (var i = 0; i < btns.length; i++) {
         var b = btns[i];
-        if (b && b.offsetParent !== null && this.isStopButton(b)) return true;
+        if (b && isVisible(b) && this.isStopButton(b)) return true;
       }
       return false;
     },
 
     clickSend: function () {
+      // Localized DOM labels are included as Unicode escapes. They are site
+      // selectors, not user-facing copy.
       var sels = [
         'button[aria-label*="Send"]',
+        'button[aria-label*="\u53d1\u9001"]',
         'button[type="submit"]'
       ];
       for (var i = 0; i < sels.length; i++) {
         var btns = document.querySelectorAll(sels[i]);
         for (var j = btns.length - 1; j >= 0; j--) {
           var b = btns[j];
-          if (b && !b.disabled && b.offsetParent !== null) {
+          if (b && !b.disabled && isVisible(b)) {
             b.click();
             return true;
           }
+        }
+      }
+      // Some localized layouts expose the send control only through its
+      // accessible label or visible text. Use the last visible send-like
+      // button, while avoiding disabled controls.
+      var all = document.querySelectorAll('button, [role="button"]');
+      for (var k = all.length - 1; k >= 0; k--) {
+        var candidate = all[k];
+        if (!candidate || candidate.disabled || !isVisible(candidate)) continue;
+        var label = ((candidate.getAttribute('aria-label') || '') + ' ' +
+          (candidate.getAttribute('title') || '') + ' ' +
+          (candidate.textContent || '')).toLowerCase();
+        if (label.indexOf('send') !== -1 || label.indexOf('\u53d1\u9001') !== -1) {
+          candidate.click();
+          return true;
         }
       }
       var ta = document.querySelector('textarea');
