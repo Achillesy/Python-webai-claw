@@ -1,42 +1,54 @@
-# FreeCAD + webai-claw video demo plan
+# FreeCAD + webai-claw demo plan
 
-Status: planning. Target: a 12-18 minute bilingual demo video.
+Status: macOS-native recording plan. Target: 8-9 silent screen-recording clips,
+each under 3 minutes, with Chinese voiceover and English subtitles added in
+post-production.
 
-Language plan:
+## 1. Decision
 
-- On-screen prompts and terminal commands: English.
-- Voiceover and Chinese operation notes: Chinese.
-- English subtitles: recommended for international viewers.
+Record on the **Mac mini M1 directly**, not in a Windows ARM64 VM.
 
-## 1. Feasibility assessment
+Reasons:
 
-Overall: **feasible, with three prerequisites**.
+- FreeCAD has a native macOS ARM64 build;
+- no x64 emulation or VM GPU issues;
+- Chrome/Edge and the native host run natively on the same machine;
+- screen recording, cursor control, and file inspection are simpler;
+- the resulting demo is shorter and more reliable.
+
+Use the **webai-claw 1.2.2 development build** for this recording. The 1.1.8
+store build does not have `write_file`, custom skill authoring, or the skill
+index required by this demo.
+
+## 2. Feasibility assessment
 
 | Item | Assessment |
 | --- | --- |
-| Windows 11 ARM64 VM | Workable, but FreeCAD's official Windows build is x64 and runs through Windows emulation. Test the viewport and startup time before recording. |
-| FreeCAD | FreeCAD 1.1.x is sufficient. Use the x64 Windows build. |
-| FreeCAD MCP addon | The `neka-nat/freecad-mcp` addon supports FreeCAD 1.0/1.1 and exposes a local XML-RPC bridge on `127.0.0.1:9875`. |
-| webai-claw | Use the **1.2.2 development build**, not the 1.1.8 store build. 1.1.8 lacks `write_file` and custom skill authoring. |
-| DeepSeek web | The existing adapter works. Use English prompts in the chat. |
-| AI-created skill | Feasible with 1.2.2: `write_file` creates `custom/AI-FREECAD.md`, and the host validates its frontmatter. |
-| Actual MCP stdio server | Optional for this demo. The skill can call the FreeCAD MCP addon's local RPC endpoint through a small stdlib helper. A generic MCP stdio bridge is a future enhancement. |
+| macOS M1 native | High confidence |
+| FreeCAD ARM64 | Native build available |
+| FreeCAD MCP addon | Supports FreeCAD 1.0/1.1 and exposes local XML-RPC on `127.0.0.1:9875` |
+| webai-claw 1.2.2 | Required for `write_file` and custom skill creation |
+| DeepSeek web | Existing adapter works |
+| AI-created skill | Feasible: `write_file` writes `custom/AI-FREECAD.md`; the host validates frontmatter |
+| MCP protocol | The demo uses the FreeCAD MCP addon's local RPC endpoint through a small Python bridge; the browser AI is not a native MCP client |
+| 3D-printable output | Feasible with FCStd, STEP, and STL export |
 
-The one honest caveat: this demo uses the FreeCAD MCP addon's **RPC endpoint**, not a full MCP client inside the browser AI. The browser AI cannot speak MCP directly; it uses `exec` to call a local Python helper, which calls the addon. The video should state this clearly.
+The one caveat to state on camera: the browser AI cannot speak MCP directly.
+It uses `exec` to call a local Python helper, which calls the FreeCAD MCP
+addon's RPC endpoint. This is still the FreeCAD MCP integration, but not a
+direct browser-to-MCP connection.
 
-## 2. Recommended demo design
-
-### Target object
+## 3. Target object
 
 A 3D-printable drop-in divider insert for a tin pencil box.
 
-External box dimensions given by the user:
+External dimensions:
 
 ```text
 189 mm x 85 mm x 18 mm
 ```
 
-Assumptions for the demo:
+Demo assumptions:
 
 - Sheet thickness: 1.5 mm.
 - Insert clearance: 2.0 mm per side.
@@ -47,179 +59,183 @@ Assumptions for the demo:
 - One longitudinal divider at y = 40 mm.
 - Two cross dividers in the back row at x = 60 mm and x = 120 mm.
 - Result: one long front compartment and three back compartments.
-- Export `FCStd`, `STEP`, and `STL` to:
-  `C:\Users\Public\webai-claw-demo\`.
+- Output directory: `~/webai-claw-demo/`.
+- Output files: `pencil-box-divider.FCStd`, `.step`, `.stl`.
 
-The video should show these assumptions on screen. Do not claim the insert fits every 189 x 85 x 18 mm tin; recommend measuring the internal dimensions for a production print.
+The video must state that these are demo assumptions, not a universal fit.
+Recommend measuring the actual internal dimensions before a production print.
 
-## 3. Environment
+## 4. Environment and prerequisites
 
 - macOS on Apple Silicon.
-- Windows 11 ARM64 virtual machine with network access.
-- Chrome or Edge inside the VM.
-- Python 3.12 for Windows.
-- Git for Windows.
-- `uv` / `uvx`.
-- FreeCAD 1.1.x Windows x64.
+- Chrome or Edge.
+- Python 3 for the native host and bridge.
+- Git.
+- FreeCAD 1.1.x macOS ARM64.
 - webai-claw 1.2.2 unpacked extension and native host.
 - DeepSeek web chat.
+- Screen recorder that can record a window or screen at 1080p.
+- Microphone muted during recording; voiceover added later.
 
-Recommended VM resources:
+Optional:
 
-- 4 CPU cores.
-- 8 GB RAM.
-- 20 GB free disk space.
-- Hardware acceleration enabled.
-- 1920x1080 display for recording.
+- Homebrew for installing FreeCAD and tools.
+- `uv` / `uvx` if you also want to inspect the upstream MCP stdio server.
 
-## 4. Pre-recording checklist
+### 4.1 Pre-recording checklist
 
-- [ ] Test FreeCAD startup and 3D viewport in the ARM64 VM.
-- [ ] Confirm the FreeCAD addon appears in the workbench list.
-- [ ] Confirm `Test-NetConnection 127.0.0.1 -Port 9875` succeeds.
-- [ ] Confirm webai-claw Connect works in Chrome/Edge inside the VM.
-- [ ] Confirm DeepSeek can send a test `exec` block.
-- [ ] Prepare an isolated demo folder:
-      `C:\Users\Public\webai-claw-demo`.
+- [ ] `python3 --version`
+- [ ] `git --version`
+- [ ] `brew --version` (or install Homebrew)
+- [ ] FreeCAD launches and displays a 3D viewport.
+- [ ] FreeCAD MCP Addon workbench is visible.
+- [ ] `nc -vz 127.0.0.1 9875` succeeds after starting the RPC server.
+- [ ] webai-claw Connect works in Chrome/Edge on this Mac.
+- [ ] DeepSeek can execute a test `exec` block.
+- [ ] `~/webai-claw-demo/` exists.
+- [ ] The desktop is clean; personal paths and machine UUID are hidden or
+      blurred.
+- [ ] Each planned clip has been rehearsed and is under 3 minutes.
 
-      ```powershell
-      New-Item -ItemType Directory -Force "C:\Users\Public\webai-claw-demo" | Out-Null
-      ```
-- [ ] Hide or blur the real machine UUID and personal paths.
-- [ ] Rehearse the AI prompts and the FreeCAD RPC startup.
-- [ ] Record at 1080p; use a clean desktop and large fonts.
+## 5. macOS commands
 
-## 5. English commands for the Windows VM
+### 5.1 Verify the environment
 
-### 5.1 Verify Windows and winget
-
-```powershell
-Get-ComputerInfo | Select-Object OsName, OsArchitecture, OsVersion
-winget --version
-```
-
-Expected: Windows 11 ARM64 and a working `winget`.
-
-### 5.2 Install Python, Git, and uv
-
-```powershell
-winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
-winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements
-powershell -ExecutionPolicy Bypass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-Close and reopen PowerShell, then verify:
-
-```powershell
-py -3.12 --version
+```bash
+sw_vers
+uname -m
+python3 --version
 git --version
-uv --version
-uvx --version
+brew --version
 ```
 
-### 5.3 Install the 1.2.2 extension and native host
+Expected: macOS on `arm64` and a working Python 3.
 
-Clone the demo build and install the native host in the Windows VM:
+If Homebrew is missing:
 
-```powershell
-$repo = Join-Path $HOME "webai-claw"
-if (Test-Path $repo) { Remove-Item -Recurse -Force $repo }
-git clone --depth 1 https://github.com/Achillesy/Python-webai-claw.git $repo
-py -3 -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py').read())"
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-In Chrome or Edge:
+### 5.2 Clone the demo source and install the native host
+
+```bash
+REPO="$HOME/webai-claw-demo-src"
+rm -rf "$REPO"
+git clone --depth 1 https://github.com/Achillesy/Python-webai-claw.git "$REPO"
+python3 "$REPO/native-host/install.py"
+```
+
+This installs the native host and registers native-messaging manifests for
+Chrome and Edge. It also installs the visible skill library under
+`~/webai-claw-skills/`.
+
+### 5.3 Load the extension
 
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked**.
-4. Select `%USERPROFILE%\webai-claw\extension`.
+4. Select:
+   ```text
+   ~/webai-claw-demo-src/extension
+   ```
 5. Confirm the popup shows extension `v1.2.2` and host `v1.2.2`.
 
-The bundled development key keeps the extension ID stable and allowlisted by the
-installer. Do not use the 1.1.8 store build for this demo; it has no `write_file`
-or custom skill authoring.
+The development key keeps the extension ID stable and allowlisted by the
+installer. Do not use the 1.1.8 store build for this demo.
 
-### 5.4 Install FreeCAD
+### 5.4 Create the demo directory
 
-```powershell
-winget install --id FreeCAD.FreeCAD -e --accept-package-agreements --accept-source-agreements
+```bash
+mkdir -p "$HOME/webai-claw-demo"
+```
+
+Using the home directory avoids macOS TCC prompts for Desktop, Documents, and
+Downloads. If you choose a protected folder, grant Full Disk Access to the
+browser that launches the native host.
+
+### 5.5 Install FreeCAD
+
+```bash
+brew install --cask freecad
+open -a FreeCAD
 ```
 
 Verify:
 
-```powershell
-winget list --id FreeCAD.FreeCAD
-Get-ChildItem "$env:ProgramFiles" -Filter "FreeCAD*" | Select-Object FullName
+```bash
+ls -d /Applications/FreeCAD.app
 ```
 
-Note: the Windows build is x64 and runs through Windows ARM64 emulation. Allow extra startup time.
-
-### 5.5 Install the FreeCAD MCP addon
-
-```powershell
-$repo = Join-Path $HOME "freecad-mcp"
-if (Test-Path $repo) { Remove-Item -Recurse -Force $repo }
-git clone --depth 1 https://github.com/neka-nat/freecad-mcp.git $repo
-
-$mod = Join-Path $env:APPDATA "FreeCAD\v1-1\Mod"
-New-Item -ItemType Directory -Force $mod | Out-Null
-Copy-Item -Recurse -Force (Join-Path $repo "addon\FreeCADMCP") (Join-Path $mod "FreeCADMCP")
-```
-
-Expected path:
+FreeCAD 1.1 on macOS uses this addon root:
 
 ```text
-%APPDATA%\FreeCAD\v1-1\Mod\FreeCADMCP\InitGui.py
+~/Library/Application Support/FreeCAD/v1-1/Mod/
 ```
 
-### 5.6 Start FreeCAD and the RPC server
+### 5.6 Install the FreeCAD MCP addon
 
-Find and launch FreeCAD:
+```bash
+MCP_REPO="$HOME/freecad-mcp"
+rm -rf "$MCP_REPO"
+git clone --depth 1 https://github.com/neka-nat/freecad-mcp.git "$MCP_REPO"
 
-```powershell
-$exe = Get-ChildItem "$env:ProgramFiles\FreeCAD*" -Filter "FreeCAD.exe" -Recurse |
-  Select-Object -First 1 -ExpandProperty FullName
-Start-Process $exe
+mkdir -p "$HOME/Library/Application Support/FreeCAD/v1-1/Mod"
+cp -R "$MCP_REPO/addon/FreeCADMCP" \
+  "$HOME/Library/Application Support/FreeCAD/v1-1/Mod/FreeCADMCP"
 ```
 
-In FreeCAD:
+Verify:
 
-1. Restart FreeCAD after copying the addon.
-2. Select **MCP Addon** from the workbench selector.
-3. Click **Start RPC Server** in the **FreeCAD MCP** toolbar.
-4. Confirm the Report View shows `127.0.0.1:9875`.
+```bash
+test -f "$HOME/Library/Application Support/FreeCAD/v1-1/Mod/FreeCADMCP/InitGui.py" && echo OK
+```
 
-Verify from PowerShell:
+Do not copy the whole repository into `Mod`, and do not create a second
+`FreeCADMCP` directory level.
 
-```powershell
-Test-NetConnection 127.0.0.1 -Port 9875
-py -3.12 -c "import socket, xmlrpc.client; socket.setdefaulttimeout(5); s=xmlrpc.client.ServerProxy('http://127.0.0.1:9875'); print(s.ping())"
+### 5.7 Start and verify the RPC server
+
+Restart FreeCAD, then:
+
+1. Select **MCP Addon** in the workbench selector.
+2. Click **Start RPC Server** in the **FreeCAD MCP** toolbar.
+3. Confirm the Report View shows `127.0.0.1:9875`.
+
+Verify from Terminal:
+
+```bash
+nc -vz 127.0.0.1 9875
+python3 -c "import xmlrpc.client; print(xmlrpc.client.ServerProxy('http://127.0.0.1:9875').ping())"
 ```
 
 Both checks must succeed before continuing.
 
-### 5.7 Optional: install the MCP stdio server
+### 5.8 Optional: inspect the MCP stdio server
 
-The addon RPC is enough for this demo. To show the upstream MCP server:
+The addon RPC endpoint is sufficient for this demo. To show the upstream MCP
+server:
 
-```powershell
+```bash
+brew install uv
 uvx freecad-mcp --help
 ```
 
-Do not run `uvx freecad-mcp` as the long-running demo bridge unless a proper MCP client is available; it is a stdio MCP server, not a shell command that returns a model directly.
+Do not run `uvx freecad-mcp` as the demo bridge unless a proper MCP client is
+available; it is a stdio MCP server, not a command that returns a model directly.
 
-## 6. Recommended local bridge
+## 6. Local bridge
 
-The browser AI uses `exec`, so create a small stdlib bridge that sends a Python script to the FreeCAD MCP addon's XML-RPC endpoint.
+The browser AI uses `exec`, so create a small Python bridge that sends a script
+to the FreeCAD MCP addon's XML-RPC endpoint.
 
 Path:
 
 ```text
-C:\Users\<user>\.webai-claw\skill\freecad_rpc.py
+~/.webai-claw/skill/freecad_rpc.py
 ```
 
-Conceptual helper:
+Reference implementation:
 
 ```python
 import argparse
@@ -236,83 +252,83 @@ proxy = xmlrpc.client.ServerProxy(args.url, allow_none=True)
 print(proxy.execute_code(code))
 ```
 
-The AI can create this helper with `write_file` during the demo. For a reliable recording, test it before recording.
+The AI can create this helper with `write_file` during the demo. Test it before
+recording:
 
-Example execution:
-
-```powershell
-py -3.12 "$HOME\.webai-claw\skill\freecad_rpc.py" --script "$HOME\webai-claw-demo\build_divider.py"
+```bash
+python3 "$HOME/.webai-claw/skill/freecad_rpc.py" \
+  --script "$HOME/webai-claw-demo/smoke_test.py"
 ```
 
-## 6.1 Security notes for the recording
+A smoke test can simply print `FreeCAD.ActiveDocument` or create a document.
+Do not show a failed bridge attempt in the final edit.
 
-- The FreeCAD addon's `execute_code` runs arbitrary Python inside FreeCAD. Treat
-  the bridge like a local automation tool, not a sandbox.
-- Keep **Remote Connections** off for the demo; the RPC server stays on
-  `127.0.0.1`.
+### 6.1 Security notes
+
+- `execute_code` runs arbitrary Python inside FreeCAD. Treat the bridge as a
+  local automation tool, not a sandbox.
+- Keep **Remote Connections** off; the RPC server stays on `127.0.0.1`.
 - Show the generated script and ask for confirmation before executing it.
 - Save the FreeCAD document before running a large generated script.
-- Do not show real API keys, account details, machine UUIDs, or private paths.
+- Do not show API keys, account details, machine UUIDs, or private paths.
 
 ## 7. English prompts for DeepSeek
 
-Use these prompts in order. The AI should send normal text first and obtain confirmation before destructive or persistent changes.
+Use these in order. Split long instructions into separate prompts and use
+natural-language confirmation before persistent changes.
 
 ### Prompt 1: Connect confirmation
 
 ```text
-You are connected to a Windows 11 ARM64 virtual machine through webai-claw.
+You are connected to a macOS Apple Silicon machine through webai-claw.
 Confirm the host, platform, and shell. Do not run any commands yet.
 ```
 
 ### Prompt 2: Install FreeCAD
 
 ```text
-Install FreeCAD on this Windows VM using winget. Use the exact package id
-FreeCAD.FreeCAD. Accept the package and source agreements. After installation,
-verify the package with winget and find the FreeCAD executable path. Report the
-commands and results. Do not open FreeCAD yet.
+Install FreeCAD on this Mac with Homebrew using: brew install --cask freecad
+The actual command must include host and "v":3. After installation, verify that
+/Applications/FreeCAD.app exists and report the result. Do not open FreeCAD yet.
 ```
 
-### Prompt 3: Install prerequisites and the MCP addon
+### Prompt 3: Install the FreeCAD MCP addon
 
 ```text
-Install Git and uv if they are missing. Clone
-https://github.com/neka-nat/freecad-mcp.git into the user's home directory.
-Copy only the addon\FreeCADMCP directory into
-%APPDATA%\FreeCAD\v1-1\Mod\FreeCADMCP. Verify that InitGui.py exists.
-Do not copy the whole repository into the Mod directory.
+Clone https://github.com/neka-nat/freecad-mcp.git into your home directory.
+Copy only addon/FreeCADMCP into:
+~/Library/Application Support/FreeCAD/v1-1/Mod/FreeCADMCP
+Verify that InitGui.py exists. Do not copy the whole repository into Mod.
 ```
 
-### Prompt 4: Prepare the local bridge
+### Prompt 4: Create the local RPC bridge
 
 ```text
-Create a small Python bridge at ~/.webai-claw/skill/freecad_rpc.py that accepts
-a --script path and sends the script contents to the FreeCAD MCP addon at
-http://127.0.0.1:9875 using xmlrpc.client execute_code. Show me the script and
-ask for confirmation before writing it.
+Create a Python bridge at ~/.webai-claw/skill/freecad_rpc.py. It must accept a
+--script path, read the file as UTF-8, and send the code to the FreeCAD XML-RPC
+endpoint at http://127.0.0.1:9875 using xmlrpc.client execute_code. Show me the
+full script and ask for confirmation before writing it.
 ```
 
-### Prompt 5: Start and verify the RPC server
+### Prompt 5: Verify the RPC server
 
 ```text
-I have started the FreeCAD MCP Addon workbench and clicked Start RPC Server.
-Verify that 127.0.0.1:9875 is listening and that the XML-RPC ping returns true.
-If it fails, diagnose the addon path and the FreeCAD Report View.
+I have opened FreeCAD, selected the MCP Addon workbench, and clicked Start RPC
+Server. Verify that 127.0.0.1:9875 is listening and that the XML-RPC ping
+returns true. If it fails, diagnose the addon path and the FreeCAD Report View.
 ```
 
-### Prompt 6: Create the skill
+### Prompt 6: Create the FreeCAD skill
 
 ```text
 Create a reusable custom skill named "freecad" in
 ~/webai-claw-skills/custom/AI-FREECAD.md. Use write_file. Include frontmatter
 with name, description, triggers, platforms, and version. Explain how to call
-the freecad_rpc.py bridge, how to create and inspect documents, how to export
-STEP and STL, and the safety rules. Ask me to confirm the complete skill before
-writing it.
+freecad_rpc.py, how to create and inspect documents, how to export STEP and STL,
+and the safety rules. Ask me to confirm the complete skill before writing it.
 ```
 
-### Prompt 7: Create the printable divider
+### Prompt 7: Build the divider insert
 
 ```text
 Use the freecad skill. Create a 3D-printable drop-in divider insert for a tin
@@ -321,132 +337,216 @@ thickness and 2 mm clearance per side. Use an insert footprint of 184 mm x
 80 mm, height 15 mm, wall and divider thickness 1.4 mm, and bottom thickness
 1.2 mm. Add one longitudinal divider at y = 40 mm and cross dividers at x = 60
 mm and x = 120 mm in the back row. Create the FreeCAD document, show an
-isometric screenshot, and export FCStd, STEP, and STL to
-C:\Users\Public\webai-claw-demo. Report the final dimensions and file paths.
+isometric view, and export FCStd, STEP, and STL to ~/webai-claw-demo. Report the
+final bounding box and file paths.
 ```
 
 ### Prompt 8: Validate the printable output
 
 ```text
-Check the exported STL for a positive volume and reasonable bounding box.
-Report the bounding box in millimeters and confirm that the STL exists.
-Do not modify the model unless I ask.
+Check the exported STL for a positive volume and a reasonable bounding box.
+Report the bounding box in millimeters and confirm that the STL exists. Do not
+modify the model unless I ask.
 ```
 
-## 8. Chinese operation flow and voiceover outline
+## 8. Silent multi-clip plan
 
-### 0:00-1:00 开场
+Record screen video only. Keep the microphone off. Add Chinese voiceover and
+English subtitles after editing. Each clip must be shorter than 3:00; target
+2:00-2:40 unless noted.
 
-画面：macOS 桌面，切到 Windows 11 ARM64 虚拟机。
+Use a title card at the start of each clip and a short freeze at the end.
 
-中文旁白：
+### Clip 1: Introduction (under 1:30)
 
-> 这是一个在 Apple Silicon Mac 上运行的 Windows 11 ARM64 虚拟机。
-> 我们会在里面安装 FreeCAD、webai-claw 和 FreeCAD MCP 控件，
-> 然后让 DeepSeek 自己安装环境、创建技能，最后设计一个可打印的文具盒隔断。
+On-screen text:
 
-字幕/画面：`FreeCAD + webai-claw + DeepSeek`。
+```text
+FreeCAD + webai-claw + DeepSeek
+macOS Apple Silicon
+```
 
-### 1:00-2:30 安装插件与连接
+Screen:
 
-画面：
+- macOS desktop;
+- FreeCAD icon;
+- webai-claw popup;
+- DeepSeek chat tab.
 
-1. 在 Chrome 打开 `chrome://extensions`；
-2. 开启 Developer mode；
-3. Load unpacked，选择 webai-claw 1.2.2 的 `extension` 目录；
-4. 在 PowerShell 运行 native host 安装命令；
-5. 打开 DeepSeek，点击扩展 Connect。
+Post voiceover topic:
 
-中文旁白：
+> 在 Mac mini M1 上，让 DeepSeek 安装 FreeCAD、创建技能，并设计一个可 3D 打印的文具盒隔断。
 
-> 这里使用 1.2.2 开发版，因为 1.1.8 商店版还没有 write_file 和技能创建能力。
-> 安装 native host 后，Connect 会把 AI-AGENT 和本机配置发给 DeepSeek。
+### Clip 2: Install the extension and host (under 2:40)
 
-### 2:30-4:30 让 AI 安装 FreeCAD
+Screen:
 
-画面：在 DeepSeek 输入 Prompt 2。
+- open Chrome/Edge extensions page;
+- Developer mode;
+- Load unpacked;
+- show `extension` folder;
+- Terminal: run `install.py`;
+- show popup extension/host version.
 
-中文旁白：
+On-screen labels:
 
-> 我们不自己敲安装命令，而是让 DeepSeek 通过 webai-claw 执行。
-> 它使用 winget 安装 FreeCAD，然后验证安装路径。
+```text
+Load unpacked: webai-claw/extension
+Install native host
+```
 
-预期：UAC 弹窗、winget 下载、FreeCAD 安装完成。
+Post voiceover topic:
 
-### 4:30-7:00 安装 MCP 控件
+> 这里使用 1.2.2 开发版，因为商店 1.1.8 还不支持 write_file 和技能创建。
 
-画面：输入 Prompt 3，展示 Git clone 和复制 `FreeCADMCP`。
+### Clip 3: Connect DeepSeek (under 2:00)
 
-中文旁白：
+Screen:
 
-> 这里安装的是 FreeCAD 的 MCP Addon。
-> 只复制 addon/FreeCADMCP，不能把整个仓库复制进 Mod 目录。
-> FreeCAD 1.1 的路径是 `%APPDATA%\FreeCAD\v1-1\Mod`。
+- open DeepSeek;
+- click Connect;
+- show connection attachment and short note;
+- show AI's host/platform confirmation.
 
-然后手动：
+On-screen label:
 
-1. 重启 FreeCAD；
-2. 选择 MCP Addon 工作台；
-3. 点击 Start RPC Server；
-4. 在 PowerShell 执行 `Test-NetConnection`。
+```text
+Connect -> host confirmation
+```
 
-### 7:00-9:00 创建本地桥和技能
+Post voiceover topic:
 
-画面：输入 Prompt 4、Prompt 6。
+> Connect 后，DeepSeek 知道当前是 macOS ARM64，以及本机 UUID。
 
-中文旁白：
+### Clip 4: Install FreeCAD (under 2:20)
 
-> 网页 AI 不能直接说 MCP，它通过 exec 调用本地 Python 桥。
-> 这个桥把脚本发给 FreeCAD 的 RPC 端口。
-> 然后我们让 DeepSeek 把这个流程保存成 custom skill。
-> 它会先展示草稿，确认后才写入 `~/webai-claw-skills/custom/AI-FREECAD.md`。
+Screen:
 
-画面：展示 AI 生成的 skill 文件和 SHA-256 结果。
+- DeepSeek prompt 2;
+- command `brew install --cask freecad`;
+- Homebrew progress, shortened with a jump cut;
+- `ls -d /Applications/FreeCAD.app`;
+- `open -a FreeCAD`.
 
-### 9:00-13:00 使用技能设计隔断
+Post voiceover topic:
 
-画面：输入 Prompt 7。
+> 安装命令由 DeepSeek 通过 webai-claw 执行，用户只负责确认。
 
-中文旁白：
+### Clip 5: Install MCP addon and start RPC (under 2:50)
 
-> 现在只给尺寸和设计要求，不再手工教 FreeCAD 命令。
-> AI 读取 freecad skill，生成 FreeCAD Python 脚本，通过本地桥执行。
-> 外尺寸 189 x 85 x 18 毫米，插入件按 184 x 80 x 15 毫米设计，
-> 留出 2 毫米间隙，隔板 1.4 毫米，底部 1.2 毫米。
-> 前侧是长笔槽，后侧分成三个小格。
+Screen:
 
-画面：FreeCAD 视口、等轴测截图、导出 STEP/STL。
+- DeepSeek prompt 3;
+- Git clone and copy to `v1-1/Mod`;
+- show `InitGui.py`;
+- restart FreeCAD;
+- select MCP Addon;
+- click Start RPC Server;
+- run `nc -vz 127.0.0.1 9875` and the XML-RPC ping.
 
-### 13:00-15:00 验证和打印
+Post voiceover topic:
 
-画面：资源管理器中的三个文件；打开 STL 查看；可选打开切片软件。
+> 这是 FreeCAD 的 MCP Addon，不是把整个仓库复制到 Mod 目录。
 
-中文旁白：
+### Clip 6: Create the bridge and skill (under 2:50)
 
-> 最后检查 STL 的包围盒和体积，确认导出文件存在。
-> 真正打印前，建议测量文具盒内部尺寸，按实际内宽调整 1-2 毫米间隙。
+Screen:
 
-### 15:00-16:00 结尾
+- DeepSeek prompt 4;
+- show `freecad_rpc.py` draft and confirm;
+- DeepSeek prompt 6;
+- show `AI-FREECAD.md` draft and confirm;
+- show `~/webai-claw-skills/custom/AI-FREECAD.md`;
+- show SHA-256/backup result if overwriting.
 
-中文旁白：
+Post voiceover topic:
 
-> 这个视频展示了三件事：
-> 第一，AI 可以安装本地软件；
-> 第二，AI 可以通过本地 RPC/MCP 控制桌面应用；
-> 第三，AI 可以把自己的工作流程保存成可复用技能。
-> 以后增加新工具，只需要增加新的 skill，不需要修改插件。
+> 网页 AI 通过 exec 调用本地桥，再调用 FreeCAD 的 RPC 端口。技能保存在 custom 目录。
 
-## 9. Known risks
+### Clip 7: Design the divider (under 2:50)
 
-1. **ARM64 emulation**: FreeCAD x64 may start slowly or have OpenGL glitches. Test before recording.
-2. **Addon path**: FreeCAD 1.1 uses `%APPDATA%\FreeCAD\v1-1\Mod`, not the old `%APPDATA%\FreeCAD\Mod`.
-3. **RPC bridge**: The browser AI is not a native MCP client. The demo must use `freecad_rpc.py` or a generic MCP bridge.
-4. **Skill authoring version**: Store 1.1.8 cannot create skills. Use 1.2.2 or wait for the 1.2 store release.
-5. **DeepSeek variability**: Long multi-step prompts may need retries. Keep each prompt focused.
-6. **Privacy**: Blur the real machine UUID, user paths, and DeepSeek account details.
-7. **Fit tolerance**: The 184 x 80 mm insert is a demo assumption, not a universal fit. Recommend measuring the actual internal dimensions before printing.
+Screen:
 
-## 10. Suggested video metadata
+- DeepSeek prompt 7;
+- AI writes a FreeCAD Python script;
+- bridge executes it;
+- FreeCAD viewport shows the insert;
+- show isometric screenshot.
+
+On-screen labels:
+
+```text
+189 x 85 x 18 mm external
+184 x 80 x 15 mm insert
+1.4 mm walls / 1.2 mm bottom
+```
+
+Post voiceover topic:
+
+> 前侧是长笔槽，后侧分成三个小格；尺寸和间隙都在提示词中明确给出。
+
+### Clip 8: Export and validate (under 2:20)
+
+Screen:
+
+- show output folder `~/webai-claw-demo`;
+- show `FCStd`, `STEP`, `STL`;
+- open STL in a viewer or slicer;
+- show bounding box/volume check.
+
+Post voiceover topic:
+
+> 检查 STL 包围盒和体积；实际打印前应测量文具盒内部尺寸。
+
+### Clip 9: Closing (under 1:00)
+
+Screen:
+
+- summary card.
+
+On-screen text:
+
+```text
+AI installs the tool.
+AI uses the local bridge.
+AI saves the workflow as a skill.
+```
+
+Post voiceover topic:
+
+> 新增工具只需要新增 skill，不需要修改插件。
+
+## 9. Recording and editing rules
+
+- Record each clip separately; never rely on one continuous take.
+- Keep the microphone muted; use system sounds only if useful.
+- Use 1080p at 30 or 60 fps.
+- Use a large cursor and a clean desktop.
+- Hide personal paths, UUIDs, account names, and notification banners.
+- Use jump cuts for long `brew` or Git operations.
+- Add English text callouts during editing; do not speak during recording.
+- Add Chinese voiceover after the cut is locked.
+- Add English subtitles for international viewers.
+- Keep each final clip under 3:00. If a clip runs long, split it rather than
+  speeding up critical UI steps.
+
+## 10. Known risks
+
+1. **Development build**: 1.2.2 is required; 1.1.8 lacks `write_file` and skill
+   authoring.
+2. **Addon path**: FreeCAD 1.1 uses
+   `~/Library/Application Support/FreeCAD/v1-1/Mod`, not an unversioned path.
+3. **RPC bridge**: the browser AI is not a native MCP client; the skill uses
+   the addon RPC through `freecad_rpc.py`.
+4. **GUI steps**: starting the MCP Addon and RPC server requires manual clicks;
+   the AI cannot click the FreeCAD UI.
+5. **TCC**: keep the output in `~/webai-claw-demo` to avoid protected-folder
+   prompts. If using Documents/Desktop, grant Full Disk Access to Chrome/Edge.
+6. **DeepSeek variability**: split long instructions and verify each step.
+7. **Fit tolerance**: 184 x 80 mm is a demo footprint; measure the real tin
+   before printing.
+
+## 11. Suggested metadata
 
 Title:
 
@@ -457,20 +557,21 @@ Can DeepSeek Install FreeCAD and Build a 3D-Printable Organizer?
 Description:
 
 ```text
-A Windows 11 ARM64 VM demo: install FreeCAD, connect webai-claw,
-create a reusable FreeCAD skill with DeepSeek, and export a 3D-printable
-pencil-box divider.
+A macOS Apple Silicon demo: install FreeCAD, connect webai-claw, create a
+reusable FreeCAD skill with DeepSeek, and export a 3D-printable pencil-box
+divider.
 ```
 
-Chapters:
+Playlist chapters:
 
 ```text
-00:00 Intro
-01:00 Install the browser bridge
-02:30 Install FreeCAD with AI
-04:30 Install the FreeCAD MCP addon
-07:00 Create the FreeCAD skill
-09:00 Design the divider insert
-13:00 Validate STEP and STL
-15:00 Conclusion
+Clip 1  Introduction
+Clip 2  Install webai-claw
+Clip 3  Connect DeepSeek
+Clip 4  Install FreeCAD
+Clip 5  Install the MCP addon
+Clip 6  Create the FreeCAD skill
+Clip 7  Design the divider
+Clip 8  Export and validate
+Clip 9  Closing
 ```
