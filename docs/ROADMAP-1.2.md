@@ -1,7 +1,7 @@
 # webai-claw 1.2 Roadmap: Skill Library
 
-Status: planning only. Do not implement 1.2 until the 1.1 Chrome and Edge
-store releases are approved and stable.
+Status: implementation started. The 1.1.8 release is tagged; keep that tag
+available for rollback while 1.2 is developed on master.
 
 Target version: `1.2.0`
 

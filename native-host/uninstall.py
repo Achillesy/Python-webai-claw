@@ -16,7 +16,7 @@ import sys
 HOST_NAME = "com.webai.claw"
 INSTALL_DIR = os.path.expanduser("~/.webai-claw")
 DOC_DIR = os.path.expanduser("~/webai-claw-skills")
-DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md"]
+DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md", "AI-MACOS.md", "AI-WIN.md"]
 
 
 def unregister():

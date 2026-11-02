@@ -42,11 +42,32 @@ DOC_DIR = os.path.expanduser("~/webai-claw-skills")
 HOST_FILES = ["host.py", "host.sh", "host.bat",
               "skill/mcp_exec.py"]  # Blender MCP socket client
 # AI operator guides live at the repo root, not under native-host/.
-DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md"]
+DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md", "AI-MACOS.md", "AI-WIN.md"]
 # Where to fetch the host program when install.py is downloaded standalone
 # (one-line install). Pinned to master; change to a tag if you need a fixed version.
 HOST_BASE_URL = "https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host"
 MACHINE_ID_PATH = os.path.join(INSTALL_DIR, "machine.json")
+
+CUSTOM_SKILLS_README = """\
+# Custom skills
+
+Put your own skills in this folder as `.md` files.
+
+Each skill starts with frontmatter:
+
+    ---
+    name: my-skill
+    description: What this skill does.
+    triggers: keyword1, keyword2
+    platforms: any
+    version: 1
+    ---
+
+Then write the instructions below it. Keep skills small and do not store
+passwords, tokens, or private keys in them.
+
+`webai-claw` scans this folder at Connect time; no extension change is needed.
+"""
 
 SKILL_README = """\
 # skill/
@@ -210,6 +231,12 @@ def install_files():
     os.makedirs(os.path.join(INSTALL_DIR, "log"), exist_ok=True)
     os.makedirs(os.path.join(INSTALL_DIR, "skill"), exist_ok=True)
     os.makedirs(DOC_DIR, exist_ok=True)
+    custom_dir = os.path.join(DOC_DIR, "custom")
+    os.makedirs(custom_dir, exist_ok=True)
+    custom_readme = os.path.join(custom_dir, "README.md")
+    if not os.path.exists(custom_readme):
+        with open(custom_readme, "w", encoding="utf-8") as f:
+            f.write(CUSTOM_SKILLS_README)
     fetch_files()
     # Older installers put the guides inside the hidden install directory.
     # Remove those copies so users have one obvious, visible location.
@@ -307,6 +334,8 @@ def main():
         "AI guides installed to %s\n"
         "  AI-AGENT.md: Connect attaches it automatically.\n"
         "  AI-BLENDER.md: the AI reads it as the Blender skill; manual upload is optional.\n"
+        "  AI-MACOS.md / AI-WIN.md: platform presets.\n"
+        "  custom/: add your own skills here; the installer never overwrites it.\n"
         "  User-facing files are outside the hidden install directory."
         % DOC_DIR
     )

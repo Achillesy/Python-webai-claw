@@ -11,7 +11,8 @@
 
 The user starts by clicking **Connect** in the extension popup. The extension
 uploads this guide and a local configuration to the chat. The local skill
-library is `~/webai-claw-skills/` (see §2.6). The configuration contains:
+library is `~/webai-claw-skills/` (see §2.6). The Connect handshake also
+includes a skill index. The configuration contains:
 
 - `host`: the UUID of this machine;
 - `hostname`: the machine name;
@@ -237,40 +238,54 @@ outside the hidden runtime directory so users can add capabilities without
 changing the extension.
 
 - `AI-AGENT.md` is this protocol, not a skill.
-- `AI-BLENDER.md` is the built-in Blender skill.
+- Root presets are installer-managed:
+  `AI-BLENDER.md`, `AI-MACOS.md`, and `AI-WIN.md`.
+- `custom/*.md` is the user-managed skill area. A custom skill with the same
+  `name` takes precedence over a preset.
 - Any other `*.md` file is a user skill.
+
+The Connect handshake includes a skill index containing `name`, `description`,
+`platforms`, `triggers`, `path`, and `source` (in the attachment, or in the
+Connect note when no attachment is needed). Use that index first. It contains
+metadata only; read the full skill file only when needed.
 
 When the user asks for a capability that may have a skill:
 
-1. If the request is clearly Blender, read `AI-BLENDER.md` directly.
-2. Otherwise list the available skills:
+1. Match the request against the Connect skill index. If the request is clearly
+   Blender, read `AI-BLENDER.md` directly.
+2. If the index is missing, stale, or the user just added a skill, list the
+   available skills:
 
    macOS/Linux:
 
    ```sh
-   ls -1 ~/webai-claw-skills/*.md
+   ls -1 ~/webai-claw-skills/*.md ~/webai-claw-skills/custom/*.md
    ```
 
    Windows PowerShell:
 
    ```powershell
-   Get-ChildItem "$HOME\webai-claw-skills\*.md" | Select-Object -ExpandProperty Name
+   Get-ChildItem "$HOME\webai-claw-skills\*.md", "$HOME\webai-claw-skills\custom\*.md" | Select-Object -ExpandProperty FullName
    ```
 
 3. Match by file name and the frontmatter fields `name`, `description`, and
    `triggers`.
 4. Read the selected skill with `exec`:
 
+   Use the exact `path` from the index.
+
    macOS/Linux:
 
    ```sh
-   sed -n '1,260p' ~/webai-claw-skills/<skill>.md
+   sed -n '1,260p' ~/webai-claw-skills/AI-BLENDER.md
+   # or: sed -n '1,260p' ~/webai-claw-skills/custom/<skill>.md
    ```
 
    Windows PowerShell:
 
    ```powershell
-   Get-Content -TotalCount 260 "$HOME\webai-claw-skills\<skill>.md"
+   Get-Content -TotalCount 260 "$HOME\webai-claw-skills\AI-BLENDER.md"
+   # or: Get-Content -TotalCount 260 "$HOME\webai-claw-skills\custom\<skill>.md"
    ```
 
 5. Follow the skill as guidance. Every command it suggests still needs a fresh
@@ -300,8 +315,9 @@ Rules:
   Inspect it first, and apply the normal security and approval rules.
 - If several skills match, ask the user which one to use.
 - Do not download or execute untrusted skill code.
-- To add a skill, the user only creates a `.md` file in
-  `~/webai-claw-skills/`; no extension change is needed.
+- To add a skill, the user creates a `.md` file in
+  `~/webai-claw-skills/custom/`; no extension change is needed. It appears in
+  the next Connect skill index.
 
 ## 3. Platform and shell
 

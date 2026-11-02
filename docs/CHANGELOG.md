@@ -3,6 +3,20 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.0] - 2026-11-02
+
+### Added
+
+- Host-generated metadata-only skill index in the Connect bundle.
+- Built-in `AI-MACOS.md` and `AI-WIN.md` presets with frontmatter.
+- `custom/` skill directory with an installer-created README; the installer
+  never overwrites custom files.
+- Skill index in the Connect attachment, or in the Connect note when no
+  attachment is needed.
+- AI-AGENT now prefers the index, loads full skill text on demand, and supports
+  custom precedence over presets.
+- Extension and host bumped to 1.2.0.
+
 ## [1.1.8] - 2026-11-02
 
 ### Added

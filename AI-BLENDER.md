@@ -1,3 +1,11 @@
+---
+name: blender
+description: Build, animate, or render a Blender scene through the local MCP bridge.
+triggers: blender, 3d, model, render, scene, animation
+platforms: macos, windows
+version: 1
+---
+
 # AI-BLENDER.md — drive Blender with webai-claw
 
 > Use this guide when the user wants to build, move, or render something in

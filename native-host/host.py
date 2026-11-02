@@ -30,13 +30,17 @@ import time
 import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "1.1.8"
+HOST_VERSION = "1.2.0"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
 LEASE_PATH = os.path.join(RUNTIME_DIR, "active.json")
 LEASE_LOCK = os.path.join(RUNTIME_DIR, "active.lock")
 HANDOFF_PATH = os.path.join(BASE_DIR, "handoff.md")
+SKILLS_DIR = os.path.join(os.path.expanduser("~"), "webai-claw-skills")
+SKILL_INDEX_MAX = 50
+SKILL_DESC_MAX = 160
+SKILL_INDEX_MAX_BYTES = 8 * 1024
 LEASE_SCHEMA = 1
 HEARTBEAT_INTERVAL = 5.0  # seconds
 LEASE_STALE_SECONDS = 30.0  # host heartbeat age before another browser may take over
@@ -876,6 +880,97 @@ def _read_text_file(path, limit=512 * 1024):
         return ""
 
 
+def _skill_platform():
+    if sys.platform == "darwin":
+        return "macos"
+    if sys.platform == "win32":
+        return "windows"
+    return "linux"
+
+
+def _parse_skill(path):
+    """Read only the frontmatter and return bounded metadata."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            first = f.readline()
+            if first.strip() != "---":
+                return None
+            meta = {}
+            for _ in range(160):
+                line = f.readline()
+                if not line:
+                    break
+                if line.strip() == "---":
+                    break
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                key = key.strip().lower()
+                value = value.strip().strip('"').strip("'")
+                if key in ("name", "description", "triggers", "platforms", "version"):
+                    meta[key] = value
+    except OSError:
+        return None
+    name = (meta.get("name") or "").strip()
+    desc = (meta.get("description") or "").strip()
+    if not name or not desc:
+        return None
+    triggers = []
+    for item in (meta.get("triggers") or "").strip("[]").split(","):
+        item = item.strip()
+        if item and item not in triggers:
+            triggers.append(item)
+    platforms = []
+    for item in (meta.get("platforms") or "any").strip("[]").split(","):
+        item = item.strip().lower()
+        if item and item not in platforms:
+            platforms.append(item)
+    if not platforms:
+        platforms = ["any"]
+    current = _skill_platform()
+    if "any" not in platforms and current not in platforms:
+        return None
+    rel = os.path.relpath(path, SKILLS_DIR).replace(os.sep, "/")
+    return {
+        "name": name[:80],
+        "description": desc[:SKILL_DESC_MAX],
+        "triggers": triggers[:8],
+        "platforms": platforms[:4],
+        "version": (meta.get("version") or "1")[:16],
+        "path": "~/webai-claw-skills/" + rel,
+        "source": "custom" if rel.startswith("custom/") else "preset",
+    }
+
+
+def _skill_index():
+    by_name = {}
+    for directory, source in ((SKILLS_DIR, "preset"),
+                              (os.path.join(SKILLS_DIR, "custom"), "custom")):
+        if not os.path.isdir(directory):
+            continue
+        try:
+            entries = sorted(os.scandir(directory), key=lambda e: e.name.lower())
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            if not entry.name.endswith(".md") or entry.name == "AI-AGENT.md":
+                continue
+            meta = _parse_skill(entry.path)
+            if not meta:
+                continue
+            # The custom directory is scanned second and wins on name conflict.
+            by_name[meta["name"]] = meta
+            if len(by_name) >= SKILL_INDEX_MAX:
+                break
+    result = sorted(by_name.values(), key=lambda x: (x["source"] != "preset", x["name"].lower()))
+    # Keep the Connect attachment bounded even if descriptions are large.
+    while len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > SKILL_INDEX_MAX_BYTES and result:
+        result.pop()
+    return result
+
+
 def run_bundle(msg):
     rid = msg.get("id")
     if not _binding_ok(msg):
@@ -897,6 +992,7 @@ def run_bundle(msg):
         "host_version": HOST_VERSION,
         "guide": guide,
         "handoff": handoff,
+        "skills": _skill_index(),
     }
 
 

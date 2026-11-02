@@ -63,11 +63,11 @@ and guides.
 
 ### Extending skills
 
-`~/webai-claw-skills/` is a visible skill library. `AI-BLENDER.md` is built in;
-users can add their own `*.md` skills with frontmatter fields `name`,
-`description`, and `triggers`. On a matching request, the AI lists the folder,
-reads the selected skill with `exec`, and follows it. No extension change or
-manual upload is required.
+`~/webai-claw-skills/` is a visible skill library. Root presets include
+`AI-BLENDER.md`, `AI-MACOS.md`, and `AI-WIN.md`; user skills belong in
+`custom/`. The host generates a metadata-only skill index at Connect time, and
+the AI reads the matching skill with `exec` only when needed. No extension
+change or manual upload is required.
 
 ### 2. Install the extension
 
@@ -119,10 +119,10 @@ The toolbar badge is intentionally minimal:
 - [1.2 roadmap](docs/ROADMAP-1.2.md)
 
 The AI operator guide is [AI-AGENT.md](AI-AGENT.md). The installed copies are
-in `~/webai-claw-skills/`; Connect attaches `AI-AGENT.md` automatically. The
-folder is also a user-extensible skill library: drop a `.md` skill there and
-the AI can discover it with `exec`, without changing the extension. For
-Blender workflows, ask the AI to use the Blender skill.
+in `~/webai-claw-skills/`; Connect attaches `AI-AGENT.md` and a skill index
+automatically. The folder is also a user-extensible skill library: add a `.md`
+skill under `custom/` and it appears in the next Connect index, without changing
+the extension. For Blender workflows, ask the AI to use the Blender skill.
 
 ## Security
 

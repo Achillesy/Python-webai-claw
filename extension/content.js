@@ -739,6 +739,29 @@ function markGuideSent(ai, hostVersion) {
   } catch (e) {}
 }
 
+function skillIndexText(config) {
+  var skills = Array.isArray(config.skills) ? config.skills : [];
+  var lines = ['## Skill index'];
+  if (!skills.length) {
+    lines.push('No skills are installed in ~/webai-claw-skills/.');
+    return lines.join('\n');
+  }
+  for (var i = 0; i < skills.length; i++) {
+    var s = skills[i] || {};
+    lines.push('- ' + (s.name || 'unnamed') + ' (' + (s.source || 'preset') + '): ' +
+      (s.description || ''));
+    if (s.path) lines.push('  path: ' + s.path);
+    if (s.platforms && s.platforms.length) {
+      lines.push('  platforms: ' + s.platforms.join(', '));
+    }
+    if (s.triggers && s.triggers.length) {
+      lines.push('  triggers: ' + s.triggers.join(', '));
+    }
+  }
+  lines.push('Read a skill only when it matches the task; full skill text is in its file.');
+  return lines.join('\n');
+}
+
 function connectAttachmentText(config, session, ai, includeGuide) {
   var lines = [];
   lines.push('# webai-claw connection');
@@ -752,6 +775,8 @@ function connectAttachmentText(config, session, ai, includeGuide) {
   lines.push('- shell: ' + (config.shell || ''));
   lines.push('- protocol: 3');
   lines.push('- host_version: ' + (config.host_version || ''));
+  lines.push('');
+  lines.push(skillIndexText(config));
   lines.push('');
   lines.push('## Protocol');
   if (includeGuide) {
@@ -798,6 +823,7 @@ function sendConnectAttachment(config) {
       'If the user names another UUID, follow the user.\n' +
       'Wait for the task.';
     var hasAttachment = includeGuide || !!(config.handoff || '').trim();
+    if (!hasAttachment) note += '\n\n' + skillIndexText(config);
 
     function sendNote() {
       var ok = false;

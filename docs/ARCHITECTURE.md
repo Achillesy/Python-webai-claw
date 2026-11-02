@@ -84,8 +84,11 @@ entry, and a host permission for that site. Supported sites in this release:
   becomes `/thread/<uuid>`, and DeepSeek bare origin or `/a/chat` becomes
   `/a/chat/s/<uuid>`. The same binding adopts the real session.
 - Muse caches the guide by host version: the first Connect sends `AI-AGENT.md`,
-  later Connects send configuration and handoff only. DeepSeek sends the guide
-  on every Connect.
+  later Connects send configuration, skill index, and handoff. DeepSeek sends
+  the guide on every Connect.
+- The host builds a metadata-only skill index from `~/webai-claw-skills/*.md`
+  and `~/webai-claw-skills/custom/*.md`; the extension includes it in the
+  Connect attachment or note.
 - Only the bound page may execute. Other tabs or browsers on the same machine
   receive `busy` and are told which page owns the lease.
 - A stale lease (dead host, missing browser, heartbeat older than 30 seconds)
