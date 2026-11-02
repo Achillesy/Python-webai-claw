@@ -363,6 +363,38 @@ Rules:
   `~/webai-claw-skills/custom/`; no extension change is needed. It appears in
   the next Connect skill index.
 
+### 2.6.1 Saving and refining skills
+
+When the user says "remember this workflow", "save this as a skill", or asks to
+improve a skill:
+
+1. Draft the complete skill with frontmatter and a short body.
+2. Show the draft or a concise summary in normal text.
+3. Ask the user to confirm the name and content.
+4. Write only to `~/webai-claw-skills/custom/<name>.md` with `write_file`.
+5. If the file exists, read it first, include `expected_sha256`, and use
+   `overwrite:true` with a backup.
+6. After success, tell the user that the skill will appear in the next Connect
+   index; in the current conversation, read the file directly when needed.
+
+Use a `write_file` block, not shell append/replace:
+
+```claw
+{"claw":"write_file","id":"skill-save-001","host":"<UUID>","path":"~/webai-claw-skills/custom/my-workflow.md","content":"---\nname: my-workflow\ndescription: My personal workflow.\ntriggers: workflow, repeat\nplatforms: any\nversion: 1\n---\n\n# My workflow\n\n1. ...\n","v":3}
+```
+
+Rules:
+
+- The host validates custom `*.md` skills: a non-empty `name` and `description`
+  in frontmatter are required. `custom/README.md` is exempt.
+- Do not edit root presets (`AI-AGENT.md`, `AI-BLENDER.md`, `AI-MACOS.md`,
+  `AI-WIN.md`); copy a preset into `custom/` with a new name instead.
+- Do not save API keys, passwords, tokens, cookies, or private keys in a skill.
+- Do not overwrite an existing custom skill without reading it and obtaining
+  explicit user confirmation.
+- Keep the skill under 8 KB; the host rejects custom skills over 32 KB.
+- The next Connect rebuilds the skill index automatically.
+
 ## 3. Platform and shell
 
 The Connect attachment states:

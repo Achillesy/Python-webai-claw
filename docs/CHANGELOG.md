@@ -3,6 +3,18 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.2] - 2026-11-02
+
+### Added
+
+- AI-assisted custom skill authoring using the existing `write_file` kind.
+- Host validation for `~/webai-claw-skills/custom/*.md`: non-empty frontmatter
+  `name` and `description`, 32 KB cap, and README exemption.
+- Root preset protection: `write_file` cannot overwrite installer-managed
+  `AI-AGENT.md`, `AI-BLENDER.md`, `AI-MACOS.md`, or `AI-WIN.md`.
+- AI-AGENT guidance to draft, confirm, and save skills under `custom/`.
+- Extension and host bumped to 1.2.2.
+
 ## [1.2.1] - 2026-11-02
 
 ### Added

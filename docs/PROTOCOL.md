@@ -67,6 +67,12 @@ the target with `os.replace`. It refuses sensitive paths, symlinks, directories,
 and payloads above 512 KB. The result includes `path`, `size`, `sha256`,
 `backup`, and `changed`.
 
+Writes to `~/webai-claw-skills/custom/*.md` are additionally validated as
+skills: frontmatter must contain a non-empty `name` and `description`. Root
+presets are installer-managed and cannot be overwritten through `write_file`;
+copy a preset into `custom/` with a new name instead. `custom/README.md` is
+exempt from skill validation.
+
 ## 2. Connect flow
 
 1. The user opens the extension popup and clicks **Connect**.

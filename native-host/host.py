@@ -32,7 +32,7 @@ import time
 import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "1.2.1"
+HOST_VERSION = "1.2.2"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
@@ -40,6 +40,8 @@ LEASE_PATH = os.path.join(RUNTIME_DIR, "active.json")
 LEASE_LOCK = os.path.join(RUNTIME_DIR, "active.lock")
 HANDOFF_PATH = os.path.join(BASE_DIR, "handoff.md")
 SKILLS_DIR = os.path.join(os.path.expanduser("~"), "webai-claw-skills")
+CUSTOM_SKILLS_DIR = os.path.join(SKILLS_DIR, "custom")
+MAX_SKILL_BYTES = 32 * 1024
 SKILL_INDEX_MAX = 50
 SKILL_DESC_MAX = 160
 SKILL_INDEX_MAX_BYTES = 8 * 1024
@@ -796,6 +798,47 @@ def run_exec(msg, cancel_event=None):
     return res
 
 
+def _inside_dir(path, directory):
+    try:
+        path = os.path.abspath(path)
+        directory = os.path.abspath(directory)
+        return os.path.commonpath([path, directory]) == directory
+    except ValueError:
+        return False
+
+
+def _custom_skill_error(data):
+    """Return an error string for an invalid custom skill, or None."""
+    if len(data) > MAX_SKILL_BYTES:
+        return "custom skill too large: %d bytes (cap %d)" % (len(data), MAX_SKILL_BYTES)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return "custom skill must be UTF-8 text"
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return "custom skill needs frontmatter with name and description"
+    meta = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().lower()
+        if key in ("name", "description"):
+            meta[key] = value.strip().strip('"').strip("'")
+    if not meta.get("name") or not meta.get("description"):
+        return "custom skill frontmatter needs non-empty name and description"
+    return None
+
+
+def _preset_skill_name(target):
+    return (os.path.dirname(os.path.abspath(target)) == os.path.abspath(SKILLS_DIR) and
+            os.path.basename(target) in ("AI-AGENT.md", "AI-BLENDER.md",
+                                         "AI-MACOS.md", "AI-WIN.md"))
+
+
 def run_write_file(msg):
     """Atomically replace or create one file after validating the request."""
     rid = msg.get("id")
@@ -852,6 +895,14 @@ def run_write_file(msg):
     parent = os.path.dirname(target)
     if not os.path.isdir(parent):
         return {"type": "error", "id": rid, "error": "parent directory does not exist"}
+    if _preset_skill_name(target):
+        return {"type": "error", "id": rid,
+                "error": "preset skills are installer-managed; copy the skill into custom/"}
+    if (_inside_dir(target, CUSTOM_SKILLS_DIR) and target.endswith(".md") and
+            os.path.basename(target) != "README.md"):
+        skill_error = _custom_skill_error(data)
+        if skill_error:
+            return {"type": "error", "id": rid, "error": skill_error}
     exists = os.path.exists(target)
     if exists and msg.get("overwrite") is not True:
         return {"type": "error", "id": rid,

@@ -68,8 +68,9 @@ and guides.
 `~/webai-claw-skills/` is a visible skill library. Root presets include
 `AI-BLENDER.md`, `AI-MACOS.md`, and `AI-WIN.md`; user skills belong in
 `custom/`. The host generates a metadata-only skill index at Connect time, and
-the AI reads the matching skill with `exec` only when needed. No extension
-change or manual upload is required.
+the AI reads the matching skill with `exec` only when needed. The AI can save a
+confirmed workflow as a custom skill with `write_file`; no extension change or
+manual upload is required.
 
 ### 2. Install the extension
 
