@@ -30,7 +30,7 @@ import time
 import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "1.1.6"
+HOST_VERSION = "1.1.7"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
@@ -881,7 +881,8 @@ def run_bundle(msg):
     if not _binding_ok(msg):
         return {"type": "error", "id": rid, "error": "not the bound page"}
     guide = ""
-    for path in (os.path.join(BASE_DIR, "AI-AGENT.md"),
+    for path in (os.path.join(os.path.expanduser("~/webai-claw-skills"), "AI-AGENT.md"),
+                 os.path.join(BASE_DIR, "AI-AGENT.md"),
                  os.path.join(os.path.dirname(BASE_DIR), "AI-AGENT.md")):
         guide = _read_text_file(path)
         if guide:

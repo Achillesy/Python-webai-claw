@@ -3,6 +3,9 @@
 > Use this guide when the user wants to build, move, or render something in
 > Blender. webai-claw must already be connected, and every `claw` block still
 > needs `host` and exact `"v":3` as described in `AI-AGENT.md`.
+>
+> The user-facing installed copy is at `~/webai-claw-skills/AI-BLENDER.md`.
+> Upload that file when the task needs Blender.
 
 ## 1. How the bridge works
 

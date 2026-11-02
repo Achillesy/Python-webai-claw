@@ -54,9 +54,10 @@ Windows PowerShell:
 py -3 -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py').read())"
 ```
 
-The installer creates `~/.webai-claw/`, installs the host and operator guides,
-and registers the Native Messaging host with Chrome. It is idempotent; re-run it
-to update the host.
+The installer creates `~/.webai-claw/` for the host and runtime files, and
+`~/webai-claw-skills/` for user-facing guides. It registers the Native
+Messaging host with Chrome. It is idempotent; re-run it to update the host
+and guides.
 
 ### 2. Install the extension
 
@@ -106,8 +107,9 @@ The toolbar badge is intentionally minimal:
 - [Privacy](PRIVACY.md)
 - [Changelog](docs/CHANGELOG.md)
 
-The AI operator guide is [AI-AGENT.md](AI-AGENT.md). For Blender workflows,
-also attach [AI-BLENDER.md](AI-BLENDER.md) in the chat.
+The AI operator guide is [AI-AGENT.md](AI-AGENT.md). The installed copies are
+in `~/webai-claw-skills/`; Connect attaches `AI-AGENT.md` automatically. For
+Blender workflows, upload `~/webai-claw-skills/AI-BLENDER.md` in the chat.
 
 ## Security
 

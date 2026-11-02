@@ -7,8 +7,8 @@
 #    subdirectories are created) and creates machine.json once if absent;
 #    reinstalls preserve the existing machine identity.
 # 2. Copies the AI operator guides (AI-AGENT.md / AI-BLENDER.md, from the
-#    repo root) into ~/.webai-claw/ so store users without a checkout
-#    have them locally; refreshed on every reinstall.
+#    repo root) into ~/webai-claw-skills/ so users can find and upload them;
+#    refreshed on every reinstall.
 # 3. Registers com.webai.claw.json with Chrome: HKCU registry on
 #    Windows, Chrome's NativeMessagingHosts dir on macOS. The manifest
 #    points at the installed copy, never at the repo.
@@ -37,6 +37,7 @@ except NameError:
     # standalone mode: fetch the host files from the network.
     HERE = None
 INSTALL_DIR = os.path.expanduser("~/.webai-claw")
+DOC_DIR = os.path.expanduser("~/webai-claw-skills")
 HOST_FILES = ["host.py", "host.sh", "host.bat",
               "skill/mcp_exec.py"]  # Blender MCP socket client
 # AI operator guides live at the repo root, not under native-host/.
@@ -92,9 +93,11 @@ def _net_base_or_raise():
     return base
 
 
-def _download_one(name, base, mirrors=None):
-    """Download one file into INSTALL_DIR from base (mirrors optional)."""
-    dst = os.path.join(INSTALL_DIR, name)
+def _download_one(name, base, mirrors=None, dst_dir=None):
+    """Download one file into dst_dir (INSTALL_DIR by default)."""
+    target_dir = dst_dir or INSTALL_DIR
+    os.makedirs(target_dir, exist_ok=True)
+    dst = os.path.join(target_dir, name)
     for b in [base] + list(mirrors or []):
         url = "%s/%s" % (b, name)
         try:
@@ -124,12 +127,12 @@ def fetch_files():
         print("Downloaded host files.")
     # AI operator guides (AI-AGENT.md / AI-BLENDER.md): they live at the repo
     # root, not under native-host/. Store users have no checkout, so ship them
-    # into the install dir where users can find them to upload into AI chats.
+    # into DOC_DIR where users can find and upload them into AI chats.
     # Unlike machine.json they are refreshed on every reinstall.
     repo_root = os.path.dirname(HERE) if HERE else None
     if repo_root and all(os.path.exists(os.path.join(repo_root, n)) for n in DOC_FILES):
         for name in DOC_FILES:
-            shutil.copy2(os.path.join(repo_root, name), os.path.join(INSTALL_DIR, name))
+            shutil.copy2(os.path.join(repo_root, name), os.path.join(DOC_DIR, name))
         print("Copied AI guides from %s" % repo_root)
     else:
         # standalone: reuse the already-probed working mirror, but at the repo
@@ -139,7 +142,7 @@ def fetch_files():
         suffix = "/native-host"
         doc_base = net_base[:-len(suffix)] if net_base.endswith(suffix) else net_base
         for name in DOC_FILES:
-            _download_one(name, doc_base)
+            _download_one(name, doc_base, dst_dir=DOC_DIR)
         print("Downloaded AI guides.")
 
 
@@ -205,7 +208,17 @@ def ensure_machine_id():
 def install_files():
     os.makedirs(os.path.join(INSTALL_DIR, "log"), exist_ok=True)
     os.makedirs(os.path.join(INSTALL_DIR, "skill"), exist_ok=True)
+    os.makedirs(DOC_DIR, exist_ok=True)
     fetch_files()
+    # Older installers put the guides inside the hidden install directory.
+    # Remove those copies so users have one obvious, visible location.
+    for name in DOC_FILES:
+        old = os.path.join(INSTALL_DIR, name)
+        if os.path.exists(old):
+            try:
+                os.remove(old)
+            except OSError:
+                pass
     readme = os.path.join(INSTALL_DIR, "skill", "README.md")
     if not os.path.exists(readme):
         with open(readme, "w", encoding="utf-8") as f:
@@ -281,8 +294,10 @@ def main():
     )
     print(
         "AI guides installed to %s\n"
-        "  Connect attaches AI-AGENT.md automatically; no manual upload needed."
-        % INSTALL_DIR
+        "  AI-AGENT.md: Connect attaches it automatically.\n"
+        "  AI-BLENDER.md: upload it manually for Blender tasks.\n"
+        "  User-facing files are outside the hidden install directory."
+        % DOC_DIR
     )
     return 0
 

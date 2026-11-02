@@ -45,7 +45,7 @@
     <div class="cmd"><button class="small" data-copy="cmd-mac">Copy</button><code id="cmd-mac">curl -fsSL https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py | python3</code></div>
     <p><strong>Windows (PowerShell)</strong></p>
     <div class="cmd"><button class="small" data-copy="cmd-win">Copy</button><code id="cmd-win">py -3 -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py').read())"</code></div>
-    <p class="hint">You run this command in your own terminal. The extension does not download or execute remote code. It installs the helper into <span class="uuid">~/.webai-claw/</span> and registers it with Chrome.</p>
+    <p class="hint">You run this command in your own terminal. The extension does not download or execute remote code. It installs the helper into <span class="uuid">~/.webai-claw/</span>, puts user-facing guides in <span class="uuid">~/webai-claw-skills/</span>, and registers it with Chrome.</p>
   </div>
 
   <div class="card" id="success">
@@ -56,8 +56,9 @@
        <a href="https://chat.deepseek.com" target="_blank">chat.deepseek.com</a>,
        click the webai-claw toolbar icon, then click <strong>Connect</strong>.</p>
     <p>The extension attaches <span class="uuid">AI-AGENT.md</span> and the local
-       config automatically. For Blender tasks, attach
-       <span class="uuid">AI-BLENDER.md</span> too. Then ask in natural language,
+       config automatically. A visible copy is in
+       <span class="uuid">~/webai-claw-skills/</span>. For Blender tasks, attach
+       <span class="uuid">~/webai-claw-skills/AI-BLENDER.md</span> too. Then ask in natural language,
        for example: “Show my home directory.” The AI will reply with a command
        block like:</p>
     <div class="example" id="example"></div>

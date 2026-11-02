@@ -4,6 +4,8 @@
 > computer through webai-claw. Every command block must include `host` (the
 > target machine UUID) and the exact numeric value `"v":3`. Do **not** write
 > `session` or `ai`; the extension adds them locally.
+>
+> The user-facing installed copy is at `~/webai-claw-skills/AI-AGENT.md`.
 
 ## 0. Connect and confirm
 

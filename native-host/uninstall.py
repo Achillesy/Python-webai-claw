@@ -5,6 +5,7 @@
 # 1. The Chrome Native Messaging registration (HKCU registry on Windows,
 #    the NativeMessagingHosts json on macOS).
 # 2. ~/.webai-claw/ (host program, logs, skills, machine identity).
+# 3. The installed guide files in ~/webai-claw-skills/ (user files are kept).
 #
 # Pass --yes to skip the confirmation prompt.
 
@@ -14,6 +15,8 @@ import sys
 
 HOST_NAME = "com.webai.claw"
 INSTALL_DIR = os.path.expanduser("~/.webai-claw")
+DOC_DIR = os.path.expanduser("~/webai-claw-skills")
+DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md"]
 
 
 def unregister():
@@ -50,10 +53,29 @@ def remove_dirs():
         print("Directory not present, skipping: %s" % INSTALL_DIR)
 
 
+def remove_docs():
+    if not os.path.isdir(DOC_DIR):
+        return
+    for name in DOC_FILES:
+        path = os.path.join(DOC_DIR, name)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                print("Removed user guide: %s" % path)
+            except OSError:
+                pass
+    try:
+        os.rmdir(DOC_DIR)
+        print("Removed directory: %s" % DOC_DIR)
+    except OSError:
+        print("Kept non-empty user guide directory: %s" % DOC_DIR)
+
+
 def main():
     print("This will unregister the webai-claw native host and delete:")
     print("  - the Chrome Native Messaging registration for %s" % HOST_NAME)
     print("  - %s" % INSTALL_DIR)
+    print("  - the installed guide files in %s" % DOC_DIR)
     if "--yes" not in sys.argv:
         try:
             answer = input("Continue? [y/N] ").strip().lower()
@@ -66,6 +88,7 @@ def main():
             return 0
     rc = unregister()
     remove_dirs()
+    remove_docs()
     print("Done. The store extension can stay installed or be removed from")
     print("chrome://extensions — it will simply have no host to talk to.")
     return rc

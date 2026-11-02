@@ -3,6 +3,20 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.7] - 2026-11-02
+
+### Changed
+
+- User-facing guides now install to the visible `~/webai-claw-skills/`
+  directory instead of the hidden `~/.webai-claw/` directory.
+- `AI-AGENT.md` and `AI-BLENDER.md` are installed there; Connect reads the
+  visible guide first, with hidden-directory fallbacks for older installs.
+- The installer and onboarding now tell users where to find
+  `AI-BLENDER.md` for manual upload.
+- The uninstaller removes the two installed guide files and only removes the
+  guide directory when no user files remain.
+- Extension and host bumped to 1.1.7.
+
 ## [1.1.6] - 2026-11-02
 
 ### Changed
