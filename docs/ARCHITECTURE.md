@@ -83,6 +83,9 @@ entry, and a host permission for that site. Supported sites in this release:
 - A new chat may lack a real session ID at Connect time. Muse `/thread/new`
   becomes `/thread/<uuid>`, and DeepSeek bare origin or `/a/chat` becomes
   `/a/chat/s/<uuid>`. The same binding adopts the real session.
+- Muse caches the guide by host version: the first Connect sends `AI-AGENT.md`,
+  later Connects send configuration and handoff only. DeepSeek sends the guide
+  on every Connect.
 - Only the bound page may execute. Other tabs or browsers on the same machine
   receive `busy` and are told which page owns the lease.
 - A stale lease (dead host, missing browser, heartbeat older than 30 seconds)

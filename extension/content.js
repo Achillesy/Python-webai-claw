@@ -29,6 +29,7 @@ var ATTACH_AUTO_KEY = 'mh_auto_send_attachments';
 var HOSTNAME_KEY = 'mh_local_hostname';
 var MACHINE_KEY = 'mh_machine_id';
 var PLATFORM_KEY = 'mh_platform';
+var GUIDE_STATE_KEY = 'mh_guide_state';
 
 // ---------- pick adapter ----------
 var adapters = window.__webaiClawAdapters || {};
@@ -743,20 +744,35 @@ function setPauseStorage(on, reason) {
   } catch (e) {}
 }
 
-function sendConnectAttachment(config) {
-  var finished = false;
-  function finish(ok, error) {
-    if (finished) return;
-    finished = true;
-    notifyConnectDone(ok, error);
-  }
-  if (!adapter || typeof adapter.uploadFile !== 'function') {
-    fillOnly('[connect] this site does not support file upload; cannot send the guide');
-    finish(false, 'this site does not support file upload');
+function shouldSendGuide(ai, hostVersion, cb) {
+  if (ai !== 'muse') {
+    cb(true);
     return;
   }
-  var session = sessionKeyOf();
-  var ai = aiType();
+  try {
+    chrome.storage.local.get([GUIDE_STATE_KEY], function (res) {
+      var state = (res && res[GUIDE_STATE_KEY]) || {};
+      cb(!state.muse || state.muse !== hostVersion);
+    });
+  } catch (e) {
+    cb(true);
+  }
+}
+
+function markGuideSent(ai, hostVersion) {
+  if (ai !== 'muse' || !hostVersion) return;
+  try {
+    chrome.storage.local.get([GUIDE_STATE_KEY], function (res) {
+      var state = (res && res[GUIDE_STATE_KEY]) || {};
+      state.muse = hostVersion;
+      var obj = {};
+      obj[GUIDE_STATE_KEY] = state;
+      chrome.storage.local.set(obj);
+    });
+  } catch (e) {}
+}
+
+function connectAttachmentText(config, session, ai, includeGuide) {
   var lines = [];
   lines.push('# webai-claw connection');
   lines.push('');
@@ -771,39 +787,42 @@ function sendConnectAttachment(config) {
   lines.push('- host_version: ' + (config.host_version || ''));
   lines.push('');
   lines.push('## Protocol');
-  lines.push(config.guide || '(AI-AGENT.md missing; re-run install.py)');
+  if (includeGuide) {
+    lines.push(config.guide || '(AI-AGENT.md missing; re-run install.py)');
+  } else {
+    lines.push('The AI-AGENT.md protocol was already provided for this AI type.');
+    lines.push('Use the same host and v3 rules.');
+  }
   if (config.handoff) {
     lines.push('');
     lines.push('## Previous handoff');
     lines.push(config.handoff);
   }
-  var text = lines.join('\n');
-  var bytes;
-  try { bytes = new TextEncoder().encode(text); }
-  catch (e) {
-    fillOnly('[connect] failed to encode guide: ' + e.message);
-    finish(false, 'failed to encode guide');
-    return;
+  return lines.join('\n');
+}
+
+function sendConnectAttachment(config) {
+  var finished = false;
+  var session = sessionKeyOf();
+  var ai = aiType();
+  var hostVersion = config.host_version || '';
+  function finish(ok, error) {
+    if (finished) return;
+    finished = true;
+    if (ok) markGuideSent(ai, hostVersion);
+    notifyConnectDone(ok, error);
   }
-  var res;
-  try {
-    res = adapter.uploadFile({ name: 'webai-claw-connect.txt', mime: 'text/plain', bytes: bytes });
-  } catch (e) {
-    fillOnly('[connect] adapter upload threw: ' + e.message);
-    finish(false, 'adapter upload threw');
-    return;
-  }
-  Promise.resolve(res).then(function (r) {
-    if (!r || !r.ok) {
-      fillOnly('[connect] guide upload failed: ' + ((r && r.why) || 'unknown'));
-      finish(false, (r && r.why) || 'guide upload failed');
-      return;
-    }
+
+  shouldSendGuide(ai, hostVersion, function (includeGuide) {
+    var text = connectAttachmentText(config, session, ai, includeGuide);
     var targetHost = config.machine_id || localMachineId || '?';
     var note = 'Connected to ' + (config.hostname || 'this computer') +
       ' (' + (config.platform || '?') + ' / ' + (config.shell || '?') + ').\n' +
       'host: ' + targetHost + '\nsession: ' + session + '\nai: ' + ai + '\n' +
-      'Read the attached protocol. Reply in normal text with:\n' +
+      (includeGuide
+        ? 'Read the attached protocol. '
+        : 'Use the AI-AGENT.md protocol already provided for this AI type. ') +
+      'Reply in normal text with:\n' +
       '"Connected to <hostname> (<platform>). I will run subsequent commands ' +
       'on this machine with host:' + targetHost + '."\n' +
       'Every claw block must include "host":"' + targetHost + '" and "v":3. ' +
@@ -811,26 +830,65 @@ function sendConnectAttachment(config) {
       'If a newer Connect attachment appears in this conversation, use its host. ' +
       'If the user names another UUID, follow the user.\n' +
       'Wait for the task.';
-    var ok = false;
-    try { ok = adapter.fillResult(note); } catch (e) { ok = false; }
-    if (!ok) {
-      fillOnly('[connect] connected, but could not fill the input box');
-      finish(false, 'could not fill the input box');
+    var hasAttachment = includeGuide || !!(config.handoff || '').trim();
+
+    function sendNote() {
+      var ok = false;
+      try { ok = adapter.fillResult(note); } catch (e) { ok = false; }
+      if (!ok) {
+        fillOnly('[connect] connected, but could not fill the input box');
+        finish(false, 'could not fill the input box');
+        return;
+      }
+      sendWithRetry({
+        tag: 'connect', maxWaitMs: 45000, intervalMs: 500,
+        respectAuto: false, respectPause: false, countAuto: false,
+        verifyDelayMs: 800,
+        verify: function () {
+          if (!adapter.isInputEmpty) return true;
+          try { return adapter.isInputEmpty(); } catch (e) { return true; }
+        },
+        onSent: function () { finish(true); },
+        onSkip: function (reason) { finish(false, 'handshake send failed: ' + (reason || 'unknown')); },
+        failNote: '\n[webai-claw] Connect note is ready but auto-send failed; press Send manually.'
+      });
+    }
+
+    if (!hasAttachment) {
+      sendNote();
       return;
     }
-    // Connect is an explicit user action. Send the handshake regardless of the
-    // Auto-send command results and Auto-send attachments preferences; those
-    // settings apply to results and AI-requested files, not to the handshake.
-    sendWithRetry({
-      tag: 'connect', maxWaitMs: 45000, intervalMs: 500,
-      respectAuto: false, respectPause: false, countAuto: false,
-      onSent: function () { finish(true); },
-      onSkip: function (reason) { finish(false, 'handshake send failed: ' + (reason || 'unknown')); },
-      failNote: '\n[webai-claw] Connect note is ready but auto-send failed; press Send manually.'
+    if (!adapter || typeof adapter.uploadFile !== 'function') {
+      fillOnly('[connect] this site does not support file upload; cannot send the guide');
+      finish(false, 'this site does not support file upload');
+      return;
+    }
+    var bytes;
+    try { bytes = new TextEncoder().encode(text); }
+    catch (e) {
+      fillOnly('[connect] failed to encode guide: ' + e.message);
+      finish(false, 'failed to encode guide');
+      return;
+    }
+    var res;
+    try {
+      res = adapter.uploadFile({ name: 'webai-claw-connect.txt', mime: 'text/plain', bytes: bytes });
+    } catch (e) {
+      fillOnly('[connect] adapter upload threw: ' + e.message);
+      finish(false, 'adapter upload threw');
+      return;
+    }
+    Promise.resolve(res).then(function (r) {
+      if (!r || !r.ok) {
+        fillOnly('[connect] guide upload failed: ' + ((r && r.why) || 'unknown'));
+        finish(false, (r && r.why) || 'guide upload failed');
+        return;
+      }
+      sendNote();
+    }, function (e) {
+      fillOnly('[connect] adapter upload threw: ' + (e && e.message || e));
+      finish(false, 'adapter upload rejected');
     });
-  }, function (e) {
-    fillOnly('[connect] adapter upload threw: ' + (e && e.message || e));
-    finish(false, 'adapter upload rejected');
   });
 }
 
@@ -1079,6 +1137,32 @@ function sendWithRetry(opts) {
       return;
     }
     var deadline = Date.now() + maxWaitMs;
+
+    function succeed() {
+      lastAutoSendAt = Date.now();
+      if (countAuto) {
+        autoSendTimes.push(lastAutoSendAt);
+        autoSentCount++;
+        console.log('[webai-claw] auto-sent ' + tag + ' (' +
+                    autoSentCount + '/' + PAUSE_AFTER + ')');
+        if (autoSentCount >= PAUSE_AFTER && !paused) pauseAutoSend('count');
+      } else {
+        console.log('[webai-claw] auto-sent ' + tag);
+      }
+      if (opts.onSent) {
+        try { opts.onSent(); } catch (e) {}
+      }
+    }
+
+    function fail() {
+      console.log('[webai-claw] ' + tag +
+                  ': send button never found after retries; staying fill-only');
+      if (opts.failNote) {
+        try { adapter.fillResult(opts.failNote); } catch (e) {}
+      }
+      skip('send-failed');
+    }
+
     (function attempt() {
       if (contextDead) return;
       if (respectPause && paused) {
@@ -1091,31 +1175,32 @@ function sendWithRetry(opts) {
         if (!busy && adapter.isUploading && adapter.isUploading()) busy = true;
       } catch (e) { busy = false; }
       if (!busy && doClickSend()) {
-        lastAutoSendAt = Date.now();
-        if (countAuto) {
-          autoSendTimes.push(lastAutoSendAt);
-          autoSentCount++;
-          console.log('[webai-claw] auto-sent ' + tag + ' (' +
-                      autoSentCount + '/' + PAUSE_AFTER + ')');
-          if (autoSentCount >= PAUSE_AFTER && !paused) pauseAutoSend('count');
-        } else {
-          console.log('[webai-claw] auto-sent ' + tag);
+        if (opts.verify) {
+          // A click can be a no-op while the site is still processing an
+          // attachment. Confirm that the composer was actually committed
+          // before reporting success.
+          setTimeout(function () {
+            if (contextDead) return;
+            var confirmed = false;
+            try { confirmed = !!opts.verify(); } catch (e) {}
+            if (confirmed) {
+              succeed();
+            } else if (Date.now() < deadline) {
+              attempt();
+            } else {
+              fail();
+            }
+          }, opts.verifyDelayMs || 700);
+          return;
         }
-        if (opts.onSent) {
-          try { opts.onSent(); } catch (e) {}
-        }
+        succeed();
         return;
       }
       if (Date.now() < deadline) {
         setTimeout(attempt, intervalMs);
         return;
       }
-      console.log('[webai-claw] ' + tag +
-                  ': send button never found after retries; staying fill-only');
-      if (opts.failNote) {
-        try { adapter.fillResult(opts.failNote); } catch (e) {}
-      }
-      skip('send-failed');
+      fail();
     })();
   }
 

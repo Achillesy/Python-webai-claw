@@ -63,8 +63,11 @@ controlled only by the user's popup setting.
    when another tab or browser owns the lease.
 5. The extension sends `{type:"bound", bound:true, session, ai}` to the page,
    then requests `{type:"bundle"}` from the host.
-6. The host returns `AI-AGENT.md` plus `handoff.md`. The extension uploads them
-   as `webai-claw-connect.txt` and fills a short note containing `host:<UUID>`.
+6. The host returns `AI-AGENT.md` plus `handoff.md`. For DeepSeek, the extension
+   uploads the guide with the configuration. For Muse, it uploads the guide only
+   on the first Connect for the current host version; later Connects send only
+   the configuration and handoff because Muse keeps the protocol in memory. It
+   fills a short note containing `host:<UUID>`.
 7. The Connect note is always sent automatically; this handshake is not
    controlled by the auto-send result or attachment preferences. The popup
    reports connected only after the note has been sent.

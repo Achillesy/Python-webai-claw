@@ -105,6 +105,15 @@
       return false;
     },
 
+    isInputEmpty: function () {
+      var ta = document.querySelector('textarea[data-hatch-composer]') ||
+               document.querySelector('textarea');
+      if (ta) return !String(ta.value || '').trim();
+      var ce = document.querySelector('[contenteditable="true"], div[role="textbox"]');
+      if (ce) return !String(ce.textContent || '').trim();
+      return true;
+    },
+
     clickSend: function () {
       // Localized DOM labels are included as Unicode escapes. They are site
       // selectors, not user-facing copy.

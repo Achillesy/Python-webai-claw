@@ -3,6 +3,24 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.4] - 2026-11-02
+
+### Fixed
+
+- DeepSeek Connect now waits for an enabled send control instead of falling
+  through to the Enter shortcut, and confirms that the composer was cleared
+  before reporting the handshake as sent. This prevents the attachment from
+  remaining in the input while the popup reports connected.
+- Muse caches `AI-AGENT.md` by host version. The first Connect sends the guide;
+  later Connects send only the machine configuration and handoff, because Muse
+  retains the protocol in conversation memory. A host upgrade sends it again.
+- Muse Connects without a guide or handoff skip the upload entirely and send
+  the short connection note directly.
+
+### Versions
+
+- Extension and host bumped to 1.1.4.
+
 ## [1.1.3] - 2026-11-01
 
 ### Changed

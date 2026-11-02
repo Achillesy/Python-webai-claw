@@ -128,6 +128,12 @@
       return false;
     },
 
+    isInputEmpty: function () {
+      var ta = document.querySelector('textarea');
+      if (!ta) return true;
+      return !String(ta.value || '').trim();
+    },
+
     clickSend: function () {
       // Localized DOM labels are included as Unicode escapes. They are site
       // selectors, not user-facing copy.
@@ -136,11 +142,14 @@
         'button[aria-label*="\u53d1\u9001"]',
         'button[type="submit"]'
       ];
+      var sawSend = false;
       for (var i = 0; i < sels.length; i++) {
         var btns = document.querySelectorAll(sels[i]);
         for (var j = btns.length - 1; j >= 0; j--) {
           var b = btns[j];
-          if (b && !b.disabled && isVisible(b)) {
+          if (!b || !isVisible(b)) continue;
+          sawSend = true;
+          if (!b.disabled) {
             b.click();
             return true;
           }
@@ -148,19 +157,25 @@
       }
       // Some localized layouts expose the send control only through its
       // accessible label or visible text. Use the last visible send-like
-      // button, while avoiding disabled controls.
+      // button, but never report success for a disabled control.
       var all = document.querySelectorAll('button, [role="button"]');
       for (var k = all.length - 1; k >= 0; k--) {
         var candidate = all[k];
-        if (!candidate || candidate.disabled || !isVisible(candidate)) continue;
+        if (!candidate || !isVisible(candidate)) continue;
         var label = ((candidate.getAttribute('aria-label') || '') + ' ' +
           (candidate.getAttribute('title') || '') + ' ' +
           (candidate.textContent || '')).toLowerCase();
-        if (label.indexOf('send') !== -1 || label.indexOf('\u53d1\u9001') !== -1) {
+        if (label.indexOf('send') === -1 && label.indexOf('\u53d1\u9001') === -1) continue;
+        sawSend = true;
+        if (!candidate.disabled) {
           candidate.click();
           return true;
         }
       }
+      if (sawSend) return false;
+      // Enter is a last resort only when the page exposes no send control at
+      // all. If a send control exists but is disabled (for example while an
+      // attachment is uploading), return false so the caller retries.
       var ta = document.querySelector('textarea');
       if (!ta) return false;
       try {

@@ -29,6 +29,11 @@ A new chat may not have a session ID when Connect is clicked (for example,
 `https://chat.deepseek.com` or Muse `/thread/new`). The extension adopts the
 real session after the first message; the user does not need to reconnect.
 
+Muse retains the protocol in conversation memory. The extension sends
+`AI-AGENT.md` on the first Muse Connect for a given host version, then sends
+only the local configuration and handoff on later Connects. A host upgrade
+resends the guide. Treat the protocol as already present in the conversation.
+
 ### 0.1 Multiple machines in the same conversation
 
 The same web AI conversation can be open on macOS and Windows at the same time.
