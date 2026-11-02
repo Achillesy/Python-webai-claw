@@ -113,6 +113,7 @@ The toolbar badge is intentionally minimal:
 
 - [Protocol v3](docs/PROTOCOL.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Interaction diagrams (Mermaid)](docs/UML.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Privacy](PRIVACY.md)
 - [Changelog](docs/CHANGELOG.md)
