@@ -116,6 +116,7 @@ The toolbar badge is intentionally minimal:
 - [Contributing](docs/CONTRIBUTING.md)
 - [Privacy](PRIVACY.md)
 - [Changelog](docs/CHANGELOG.md)
+- [1.2 roadmap](docs/ROADMAP-1.2.md)
 
 The AI operator guide is [AI-AGENT.md](AI-AGENT.md). The installed copies are
 in `~/webai-claw-skills/`; Connect attaches `AI-AGENT.md` automatically. The
