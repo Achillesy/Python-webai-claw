@@ -3,6 +3,20 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.1] - 2026-11-02
+
+### Added
+
+- `write_file` protocol kind for complete local file creation or replacement.
+- Atomic same-directory temporary writes, optional `expected_sha256`
+  validation, backups by default, and a 512 KB raw payload cap.
+- Host protection against sensitive paths, symlinks, directories, and writes
+  without explicit `overwrite:true`.
+- Extension/background routing and result reporting for `write_file`.
+- AI-AGENT guidance to prefer `write_file` over shell append/replace loops for
+  complete file changes.
+- Extension and host bumped to 1.2.1.
+
 ## [1.2.0] - 2026-11-02
 
 ### Added

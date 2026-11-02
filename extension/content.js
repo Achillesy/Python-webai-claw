@@ -20,7 +20,8 @@
 var STABLE_MS = 1000;
 var VERSION = (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : "?";
 var MAX_RESULT = 6000;
-var MAX_CMD_BYTES = 512 * 1024; // per-block command cap: Chrome native messaging hard limit is 1MB per message; keep margin (host-side file chunks use 500KB likewise)
+var MAX_CMD_BYTES = 512 * 1024;
+var MAX_WRITE_BYTES = 512 * 1024; // write_file payload cap; host enforces the same raw-byte limit
 var KEEP_HEAD = 2000;
 var KEEP_TAIL = 3500;
 var STORE_KEY = 'mh_processed_ids_v2';  // session-scoped keys: <session>|<id>
@@ -300,7 +301,7 @@ function parseBlock(text) {
   var head;
   try { head = JSON.parse(first); } catch (e) { return null; }
   if (!head || (typeof head.id !== 'string' && typeof head.id !== 'number') || !head.id) return null;
-  if (['exec', 'probe', 'attach', 'diag', 'summary'].indexOf(head.claw) === -1) return null;
+  if (['exec', 'probe', 'attach', 'diag', 'summary', 'write_file'].indexOf(head.claw) === -1) return null;
   if (head.v !== 3) return null;
   var cmdFromHead = (typeof head.cmd === 'string') ? head.cmd : null;
   var cmdFromBody = (nl === -1 ? '' : text.slice(nl + 1)).trim();
@@ -313,6 +314,11 @@ function parseBlock(text) {
     sel: (typeof head.sel === 'string') ? head.sel : null,
     path: (typeof head.path === 'string') ? head.path : null,
     text: (typeof head.text === 'string') ? head.text : null,
+    content: (typeof head.content === 'string') ? head.content : null,
+    encoding: head.encoding === 'base64' ? 'base64' : 'utf8',
+    overwrite: head.overwrite === true,
+    expected_sha256: (typeof head.expected_sha256 === 'string') ? head.expected_sha256 : null,
+    backup: head.backup !== false,
     cmd: cmdFromHead !== null ? cmdFromHead : cmdFromBody
   };
 }
@@ -623,6 +629,55 @@ function execBlock(block) {
     delete cmdById[block.id];
     if (contextDead) warnContextDead();
     else fillBack('failed to send to extension background: ' + e.message);
+  }
+}
+
+function writeFileBlock(block) {
+  if (!bound ||
+      (boundSession && sessionKeyOf() !== boundSession) ||
+      (boundAi && aiType() !== boundAi)) {
+    console.log('[webai-claw] write_file ' + block.id + ' ignored: page is not the bound owner');
+    return;
+  }
+  if (!block.path) {
+    fillBack('[claw:write_file] id=' + block.id + ' error=missing path');
+    return;
+  }
+  if (block.content === null) {
+    fillBack('[claw:write_file] id=' + block.id + ' error=missing content');
+    return;
+  }
+  if (block.content.length > MAX_WRITE_BYTES) {
+    markProcessed(block.id);
+    fillBack('[claw:write_file] id=' + block.id + ' error=content too large (~' +
+      Math.round(block.content.length / 1024) + 'KB, cap 512KB); rejected');
+    return;
+  }
+  inFlight[block.id] = true;
+  cmdById[block.id] = 'write_file: ' + block.path;
+  console.log('[webai-claw] writing ' + block.id + ': ' + block.path);
+  try {
+    getPort().postMessage({
+      type: 'write_file',
+      id: block.id,
+      host: block.host,
+      session: sessionKeyOf(),
+      ai: aiType(),
+      binding_id: BINDING_ID,
+      gen: gen,
+      path: block.path,
+      content: block.content,
+      encoding: block.encoding,
+      overwrite: !!block.overwrite,
+      expected_sha256: block.expected_sha256 || undefined,
+      backup: !!block.backup
+    });
+    markProcessed(block.id);
+  } catch (e) {
+    delete inFlight[block.id];
+    delete cmdById[block.id];
+    if (contextDead) warnContextDead();
+    else fillBack('[claw:write_file] id=' + block.id + ' error=failed to send: ' + e.message);
   }
 }
 
@@ -1280,6 +1335,7 @@ function scan() {
       console.log('[webai-claw] block ' + block.id + ' stable, executing');
       if (again.kind === 'probe') probeBlock(again);
       else if (again.kind === 'attach') attachBlock(again);
+      else if (again.kind === 'write_file') writeFileBlock(again);
       else if (again.kind === 'diag') diagBlock(again);
       else if (again.kind === 'summary') summaryBlock(again);
       else execBlock(again);

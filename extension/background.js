@@ -158,6 +158,7 @@ function forwardToHost(item) {
   hostBusy = true;
   const desc = item.kind === "exec" ? String(item.msg.cmd || "")
     : item.kind === "read_file" ? ("read_file:" + item.msg.path)
+    : item.kind === "write_file" ? ("write_file:" + item.msg.path)
     : item.kind;
   running = { id: item.msg.id, port: item.port, session: item.session,
               ai: item.ai, binding_id: item.binding_id, gen: item.gen,
@@ -183,6 +184,17 @@ function forwardToHost(item) {
     } else if (item.kind === "read_file") {
       ensureNativePort().postMessage({
         type: "read_file", id: item.msg.id, path: item.msg.path,
+        host: item.host, binding_id: item.binding_id,
+        session: item.session, ai: item.ai,
+        gen: item.gen,
+      });
+    } else if (item.kind === "write_file") {
+      ensureNativePort().postMessage({
+        type: "write_file", id: item.msg.id, path: item.msg.path,
+        content: item.msg.content, encoding: item.msg.encoding || "utf8",
+        overwrite: item.msg.overwrite === true,
+        expected_sha256: item.msg.expected_sha256 || undefined,
+        backup: item.msg.backup !== false,
         host: item.host, binding_id: item.binding_id,
         session: item.session, ai: item.ai,
         gen: item.gen,
@@ -528,6 +540,9 @@ chrome.runtime.onConnect.addListener((pagePort) => {
       enqueue(pagePort, "exec", msg);
     } else if (msg.type === "read_file" && msg.id && msg.path) {
       enqueue(pagePort, "read_file", msg);
+    } else if (msg.type === "write_file" && msg.id && msg.path &&
+               typeof msg.content === "string") {
+      enqueue(pagePort, "write_file", msg);
     } else if (msg.type === "diag" && msg.id) {
       enqueue(pagePort, "diag", msg);
     } else if (msg.type === "summary" && msg.id) {

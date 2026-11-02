@@ -38,6 +38,7 @@ Rules:
 | `exec` | Run a shell command on the host | `host`, `v`, `cmd` or body |
 | `probe` | Read-only page DOM probe; stays in the page, still host-gated | `host`, `v`, `sel` |
 | `attach` | Host reads a local file; page uploads it as a chat attachment | `host`, `v`, `path` (optional `text`) |
+| `write_file` | Atomically create or replace a local file | `host`, `v`, `path`, `content` |
 | `diag` | Host, lease, and history diagnostics | `host`, `v` |
 | `summary` | Write `~/.webai-claw/handoff.md` for the next Connect | `host`, `v`, body |
 
@@ -50,6 +51,21 @@ Optional `exec` fields:
 
 The `attach` kind has no `send` field in v3. Whether an attachment auto-sends is
 controlled only by the user's popup setting.
+
+`write_file` fields:
+
+- `path`: absolute path or a path beginning with `~`.
+- `content`: complete file content as a JSON string; `""` creates an empty file.
+- `encoding`: `utf8` (default) or `base64`.
+- `overwrite`: must be `true` when the target exists.
+- `expected_sha256`: optional old-file hash; a mismatch rejects the write.
+- `backup`: defaults to true; backups are stored next to the target with a
+  `.webai-claw.bak.<timestamp>` suffix.
+
+The host writes through a same-directory temporary file and atomically replaces
+the target with `os.replace`. It refuses sensitive paths, symlinks, directories,
+and payloads above 512 KB. The result includes `path`, `size`, `sha256`,
+`backup`, and `changed`.
 
 ## 2. Connect flow
 
@@ -109,15 +125,16 @@ length-prefixed UTF-8.
 | `{type:"cancel", id, binding_id}` | `{type:"result", ok}` for a foreign lease |
 | `{type:"summary", id, host, text, binding_id, session, ai}` | `{type:"result", kind:"summary", ...}` |
 | `{type:"read_file", id, host, path, binding_id, session, ai}` | `{type:"file_chunk", ...}` chunks / `error` |
+| `{type:"write_file", id, host, path, content, encoding?, overwrite?, expected_sha256?, backup?, binding_id, session, ai}` | `{type:"result", ...}` / `{type:"error", ...}` |
 | `{type:"diag", id, host, binding_id, session, ai}` | `{type:"result", ...}` |
 
 Exec result fields: `id`, `ok`, `exit_code`, `stdout`, `stderr`, `duration_ms`,
 `machine_id`, `session`, `ai`, `hostname`, `platform`, `timeout`, `approved`,
 and `killed`.
 
-Binding and context matching is strict. A command, file read, summary, or diag
-request with a missing or mismatched `binding_id`, `session`, or `ai` is
-rejected. There is no unbound execution path.
+Binding and context matching is strict. A command, file read, file write,
+summary, or diag request with a missing or mismatched `binding_id`, `session`,
+or `ai` is rejected. There is no unbound execution path.
 
 ## 4. Host to page: results
 

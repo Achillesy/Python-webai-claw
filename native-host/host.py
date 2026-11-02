@@ -20,8 +20,10 @@ import hashlib
 import json
 import mimetypes
 import os
+import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -30,7 +32,7 @@ import time
 import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "1.2.0"
+HOST_VERSION = "1.2.1"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
@@ -60,6 +62,7 @@ HISTORY_LOCK_STALE = 10  # seconds; a crashed holder's lock file is removable af
 # output text are never persisted; full output is filled back into the page.
 MAX_FILE_SIZE = 25 * 1024 * 1024  # single-file cap 25MB
 MAX_CMD_BYTES = 512 * 1024  # single-command cap 512KB (Chrome native message hard limit is 1MB; keep margin; matches the extension side)
+MAX_WRITE_BYTES = 512 * 1024  # write_file raw payload cap; larger files need a future chunked writer
 CHUNK_B64 = 500 * 1024  # base64 chars per chunk (raw ~375KB; keep margin under the 1MB message limit)
 FILE_DENY = (
     "/.ssh/", "/.aws/", "/.gnupg/", "/.config/gcloud/",
@@ -793,6 +796,136 @@ def run_exec(msg, cancel_event=None):
     return res
 
 
+def run_write_file(msg):
+    """Atomically replace or create one file after validating the request."""
+    rid = msg.get("id")
+    if not _binding_ok(msg):
+        return {"type": "error", "id": rid, "error": "not the bound page"}
+    if not _target_ok(msg):
+        return {"type": "error", "id": rid, "error": "missing or mismatched host"}
+    path = msg.get("path")
+    content = msg.get("content")
+    if not isinstance(path, str) or not path:
+        return {"type": "error", "id": rid, "error": "missing path"}
+    if not isinstance(content, str):
+        return {"type": "error", "id": rid, "error": "missing content"}
+    session = msg.get("session") or ""
+    refresh_history()
+    hkey = _history_key({"id": rid, "session_key": _session_key(session)})
+    if hkey in HISTORY:
+        h = HISTORY[hkey]
+        return {
+            "type": "result", "id": rid,
+            "hostname": socket.gethostname(), "machine_id": MACHINE_ID,
+            "session": session, "ai": msg.get("ai") or h.get("ai", ""),
+            "ok": h.get("ok"), "exit_code": h.get("exit_code"),
+            "stdout": "…(dedup hit: this write id was already executed; no second write)",
+            "stderr": "", "duration_ms": h.get("duration_ms", 0),
+            "duplicate": True, "ts": h.get("ts", 0),
+        }
+    started = time.time()
+    mode = msg.get("mode") or "replace"
+    if mode != "replace":
+        return {"type": "error", "id": rid, "error": "unsupported write mode: %s" % mode}
+    encoding = msg.get("encoding") or "utf8"
+    if encoding not in ("utf8", "base64"):
+        return {"type": "error", "id": rid, "error": "unsupported encoding: %s" % encoding}
+    try:
+        data = (content.encode("utf-8") if encoding == "utf8"
+                else base64.b64decode(content, validate=True))
+    except Exception as e:
+        return {"type": "error", "id": rid, "error": "content decode failed: %r" % (e,)}
+    if len(data) > MAX_WRITE_BYTES:
+        return {"type": "error", "id": rid,
+                "error": "write payload too large: %d bytes (cap %d)" %
+                         (len(data), MAX_WRITE_BYTES)}
+    target = os.path.abspath(os.path.expanduser(path))
+    low = target.lower()
+    for pat in FILE_DENY:
+        if pat in low:
+            log("write_file DENY id=%s path_len=%d pattern=%s" % (rid, len(target), pat))
+            return {"type": "error", "id": rid, "error": "refusing to write sensitive path"}
+    if os.path.islink(target):
+        return {"type": "error", "id": rid, "error": "refusing to write through a symlink"}
+    if os.path.exists(target) and not os.path.isfile(target):
+        return {"type": "error", "id": rid, "error": "target is not a regular file"}
+    parent = os.path.dirname(target)
+    if not os.path.isdir(parent):
+        return {"type": "error", "id": rid, "error": "parent directory does not exist"}
+    exists = os.path.exists(target)
+    if exists and msg.get("overwrite") is not True:
+        return {"type": "error", "id": rid,
+                "error": "target exists; resend with overwrite=true after user confirmation"}
+    old = b""
+    old_sha = None
+    if exists:
+        try:
+            with open(target, "rb") as f:
+                old = f.read()
+            old_sha = hashlib.sha256(old).hexdigest()
+        except OSError as e:
+            return {"type": "error", "id": rid, "error": "read existing file failed: %r" % (e,)}
+        expected = (msg.get("expected_sha256") or "").strip().lower()
+        if expected and expected != old_sha:
+            return {"type": "error", "id": rid,
+                    "error": "expected_sha256 mismatch; file changed, re-read and retry"}
+    new_sha = hashlib.sha256(data).hexdigest()
+    backup_path = None
+    if exists and msg.get("backup") is not False:
+        backup_path = target + ".webai-claw.bak." + time.strftime("%Y%m%d-%H%M%S")
+        n = 1
+        while os.path.exists(backup_path):
+            backup_path = target + ".webai-claw.bak." + time.strftime("%Y%m%d-%H%M%S") + "." + str(n)
+            n += 1
+        try:
+            shutil.copy2(target, backup_path)
+        except OSError as e:
+            return {"type": "error", "id": rid, "error": "backup failed: %r" % (e,)}
+    tmp = target + ".webai-claw.tmp.%d.%s" % (os.getpid(), uuid.uuid4().hex)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        if exists:
+            try:
+                os.chmod(tmp, stat.S_IMODE(os.stat(target).st_mode))
+            except OSError:
+                pass
+        os.replace(tmp, target)
+    except OSError as e:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+        return {"type": "error", "id": rid, "error": "write failed: %r" % (e,)}
+    summary = ("wrote %s\nsize: %d bytes\nsha256: %s\nbackup: %s" %
+               (target, len(data), new_sha, backup_path or "none"))
+    result = {
+        "type": "result", "id": rid,
+        "hostname": socket.gethostname(), "machine_id": MACHINE_ID,
+        "session": msg.get("session") or "", "ai": msg.get("ai") or "",
+        "ok": True, "exit_code": 0, "stdout": summary, "stderr": "",
+        "duration_ms": int((time.time() - started) * 1000),
+        "path": target, "size": len(data), "sha256": new_sha,
+        "backup": backup_path, "changed": old_sha != new_sha,
+    }
+    session_key = _session_key(msg.get("session") or "")
+    append_history({
+        "id": rid, "ok": True, "exit_code": 0,
+        "duration_ms": result["duration_ms"], "ts": int(time.time()),
+        "session_key": session_key, "ai": msg.get("ai") or "",
+        "cmd_len": 0, "stdout_len": len(summary), "stderr_len": 0,
+    })
+    log("write_file id=%s path_len=%d size=%d backup=%s" %
+        (rid, len(target), len(data), bool(backup_path)))
+    return result
+
+
 def run_read_file(msg):
     """Read a local file, return it base64-encoded in chunks. Deny-list + size cap."""
     rid = msg.get("id")
@@ -1264,6 +1397,8 @@ def handle(msg):
         return run_diag(msg)
     if t == "read_file":
         return run_read_file(msg)
+    if t == "write_file":
+        return run_write_file(msg)
     return {"type": "error", "id": msg.get("id"), "error": "unknown type: %r" % (t,)}
 
 

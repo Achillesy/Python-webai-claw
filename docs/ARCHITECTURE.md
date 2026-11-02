@@ -128,6 +128,8 @@ entry, and a host permission for that site. Supported sites in this release:
   mismatched `host`, `binding_id`, `session`, or `ai`.
 - Dedup is scoped by `(session, id)`: the same command never executes twice in
   one conversation, while the same ID in another conversation is independent.
-- The host refuses sensitive paths for file uploads and caps file size.
+- The host refuses sensitive paths for file reads and writes. Writes use a
+  same-directory temporary file, atomic replacement, optional hash validation,
+  and a backup by default.
 - The AI and the user are responsible for the commands they request. The
   extension does not maintain a command allowlist.

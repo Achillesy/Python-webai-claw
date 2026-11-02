@@ -235,3 +235,30 @@ sequenceDiagram
 
 DeepSeek sends the guide on Connect rather than relying on long-lived memory.
 The machine binding is still tied to the page, not to the URL alone.
+
+## 8. File write
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as AI chat page
+    participant C as Content script
+    participant B as Background service worker
+    participant H as Native host
+    participant F as Local filesystem
+
+    A-->>C: render write_file block
+    C->>C: validate bound page and host UUID
+    C->>B: write_file(path, content, overwrite, expected_sha256)
+    B->>H: write_file
+    H->>F: read old file and verify expected hash
+    H->>F: copy backup, write temporary file, fsync
+    H->>F: atomic replace target
+    H-->>B: result(path, size, sha256, backup)
+    B->>C: route result to the originating page
+    C->>A: fill result and auto-send after 500 ms
+    A-->>A: verify hash and continue
+```
+
+`write_file` is not a shell redirect. It uses a same-directory temporary file,
+atomic replacement, optional hash validation, and a backup by default.

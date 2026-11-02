@@ -100,6 +100,7 @@ All kinds require `host` and `v:3`.
 | `exec` | Run a shell command on the host | `host`, `v`, `cmd` or body |
 | `probe` | Read-only page DOM inspection | `host`, `v`, `sel` |
 | `attach` | Read a local file and upload it as a chat attachment | `host`, `v`, `path` (optional `text`) |
+| `write_file` | Atomically create or replace a local file | `host`, `v`, `path`, `content` |
 | `diag` | Return host status, lease, recent history, and log tail | `host`, `v` |
 | `summary` | Write a handoff for the next Connect | `host`, `v`, body |
 
@@ -177,6 +178,49 @@ Verified site limits:
 - Muse's 10 MB result is verified; 25 MB is only the host cap, not a promise
   that Muse accepts a 25 MB file.
 - Once uploaded, the file leaves the machine. Do not upload sensitive files.
+
+### 2.3.1 write_file
+
+Use `write_file` when you need to create or replace a complete local file. It
+writes through a host-side temporary file and atomically replaces the target;
+it is not a shell redirection.
+
+```claw
+{"claw":"write_file","id":"example-write-006","host":"<UUID>","path":"/Users/me/project/config.json","content":"{\n  \"enabled\": true\n}\n","overwrite":true,"v":3}
+```
+
+Fields:
+
+- `path`: absolute path or a path starting with `~`.
+- `content`: complete file content as a JSON string. An empty string creates an
+  empty file.
+- `encoding`: `utf8` (default) or `base64` for binary content.
+- `overwrite`: must be boolean `true` when the target already exists. For a new
+  file, omit it or set it to `false`.
+- `expected_sha256`: optional old-file SHA-256. The write is rejected if the
+  file changed after you read it.
+- `backup`: defaults to true. Set to `false` only when the user explicitly
+  agrees; backups stay next to the target with a
+  `.webai-claw.bak.<timestamp>` suffix.
+
+Rules:
+
+- Read the target first if it exists; show the user a short diff or summary
+  before overwriting.
+- Prefer `write_file` for a complete replacement of a small or medium file.
+  Do not use `sed -i`, `perl -pi`, `cat >`, `Set-Content`, or append loops for
+  that task when `write_file` is available.
+- Use shell patch scripts only for targeted edits to files too large for
+  `write_file`, or when the user explicitly asks for a patch workflow.
+- The raw payload cap is 512 KB. If the complete file is larger, split the task
+  or use a verified patch workflow; never leave a truncated file.
+- Sensitive paths are refused. Do not write secrets, tokens, passwords, cookies,
+  `.ssh`, `.aws`, `.env`, or private keys.
+- The host writes atomically and returns the new SHA-256, size, and backup path.
+  Verify the result before continuing.
+- A write is a system change. Ask for explicit user confirmation before
+  overwriting or creating a file unless the user already requested that exact
+  change.
 
 ### 2.4 diag
 
@@ -489,7 +533,9 @@ Do not copy the entire conversation into a new chat. Use `summary`.
   host does not prompt for, store, or fill passwords. Never put a password in a
   command.
 - Prefer idempotent, re-runnable commands; old blocks may be replayed.
-- Do not inline large files as base64 in a command block. Use `attach`.
+- Do not inline large files as base64 in a command block. Use `attach` for
+  sending a local file to the AI, and `write_file` for creating a local
+  file from AI-generated content.
 - Do not run commands the user did not ask for.
 - Do not send this guide's templates as real commands.
 - Never write `host` as a hostname, `*`, or a guess. Copy the UUID from Connect.
@@ -524,8 +570,9 @@ Do not copy the entire conversation into a new chat. Use `summary`.
 - **Attachment waits in the input box**: auto-send attachments is off, the
   upload is still in progress, or the send button is not ready. Wait for the
   user; do not resend the same attach repeatedly.
-- **Truncated command**: keep blocks short; append large files in chunks; do not
-  nest triple backticks inside a block.
+- **Truncated command**: keep blocks short. For complete file changes, use
+  `write_file` instead of chunked shell appends. For files over the write
+  cap, use a verified patch workflow and never leave a partial file.
 - **Wrong shell syntax**: read `platform` and `shell` from Connect.
 - **host busy**: another task is running. Ask the user to wait or interrupt.
 - **Connection busy**: another tab or browser owns the host. Ask the user to
