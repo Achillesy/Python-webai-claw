@@ -229,6 +229,23 @@ def write_manifest(target_path):
     return target_path
 
 
+def print_macos_permission_notes():
+    print(
+        "\nmacOS file access\n"
+        "  The host is launched by the browser, not by Terminal.\n"
+        "  If you need ~/Desktop, ~/Documents, or ~/Downloads:\n"
+        "    1. Open System Settings > Privacy & Security > Full Disk Access\n"
+        "    2. Enable the browser that launches the host: Google Chrome\n"
+        "       (or Microsoft Edge after its host registration is added)\n"
+        "    3. Quit the browser completely and reopen it\n"
+        "    4. Reconnect webai-claw in the AI chat\n"
+        "  Terminal permission alone does not apply to the browser-launched host.\n"
+        "  No sudo or chmod can bypass this macOS privacy control.\n"
+        "  Open the settings pane with:\n"
+        "    open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\""
+    )
+
+
 def main():
     install_files()
     print("Installed host program to %s" % INSTALL_DIR)
@@ -248,6 +265,7 @@ def main():
         os.makedirs(target_dir, exist_ok=True)
         manifest_path = write_manifest(os.path.join(target_dir, HOST_NAME + ".json"))
         print("Wrote host manifest: %s" % manifest_path)
+        print_macos_permission_notes()
     else:
         print("Unsupported platform: %s (Windows and macOS only)" % sys.platform)
         return 1

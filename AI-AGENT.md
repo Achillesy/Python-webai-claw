@@ -439,6 +439,14 @@ Do not copy the entire conversation into a new chat. Use `summary`.
 - **host busy**: another task is running. Ask the user to wait or interrupt.
 - **Connection busy**: another tab or browser owns the host. Ask the user to
   disconnect there or wait for the task to finish.
+- **macOS `Operation not permitted` for Desktop, Documents, or Downloads**:
+  this is macOS privacy protection (TCC), not a missing directory or a shell
+  syntax error. Stop retrying; do not use `sudo`, `chmod`, or copy the folder.
+  Tell the user to grant the browser that launches the host (Google Chrome or
+  Microsoft Edge) **Full Disk Access**, or the relevant Files and Folders
+  permission. The user must fully quit and reopen the browser, reconnect, and
+  then retry with a new `id`. Terminal permission alone does not apply unless
+  the host was started manually from Terminal.
 
 ## 10. Examples
 

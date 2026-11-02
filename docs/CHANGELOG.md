@@ -3,6 +3,18 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.6] - 2026-11-02
+
+### Changed
+
+- The macOS installer now explains the TCC permission needed for Desktop,
+  Documents, and Downloads, including the correct browser target and the
+  required browser restart.
+- `AI-AGENT.md` now tells the AI to stop retrying on `Operation not permitted`
+  and guide the user through Full Disk Access instead of attempting `sudo`,
+  `chmod`, or folder copying.
+- Host version bumped to 1.1.6; extension code remains 1.1.5.
+
 ## [1.1.5] - 2026-11-02
 
 ### Changed
