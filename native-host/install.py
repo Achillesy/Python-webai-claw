@@ -9,9 +9,9 @@
 # 2. Copies the AI operator guides (AI-AGENT.md / AI-BLENDER.md, from the
 #    repo root) into ~/webai-claw-skills/ so users can find and upload them;
 #    refreshed on every reinstall.
-# 3. Registers com.webai.claw.json with Chrome: HKCU registry on
-#    Windows, Chrome's NativeMessagingHosts dir on macOS. The manifest
-#    points at the installed copy, never at the repo.
+# 3. Registers com.webai.claw.json with Chrome and Edge: HKCU registry
+#    on Windows, each browser's NativeMessagingHosts dir on macOS. The
+#    manifest points at the installed copy, never at the repo.
 #
 # The dev extension ID is allowlisted below. Add the Chrome Web Store
 # extension ID after the first store upload.
@@ -250,7 +250,7 @@ def print_macos_permission_notes():
         "  If you need ~/Desktop, ~/Documents, or ~/Downloads:\n"
         "    1. Open System Settings > Privacy & Security > Full Disk Access\n"
         "    2. Enable the browser that launches the host: Google Chrome\n"
-        "       (or Microsoft Edge after its host registration is added)\n"
+        "       or Microsoft Edge\n"
         "    3. Quit the browser completely and reopen it\n"
         "    4. Reconnect webai-claw in the AI chat\n"
         "  Terminal permission alone does not apply to the browser-launched host.\n"
@@ -268,17 +268,27 @@ def main():
         manifest_path = write_manifest(os.path.join(INSTALL_DIR, HOST_NAME + ".json"))
         import winreg
 
-        key_path = "Software\\Google\\Chrome\\NativeMessagingHosts\\" + HOST_NAME
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-            winreg.SetValueEx(key, None, 0, winreg.REG_SZ, manifest_path)
-        print("Registered host: HKCU\\%s" % key_path)
+        key_paths = [
+            "Software\\Google\\Chrome\\NativeMessagingHosts\\" + HOST_NAME,
+            "Software\\Microsoft\\Edge\\NativeMessagingHosts\\" + HOST_NAME,
+        ]
+        for key_path in key_paths:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                winreg.SetValueEx(key, None, 0, winreg.REG_SZ, manifest_path)
+            print("Registered host: HKCU\\%s" % key_path)
     elif sys.platform == "darwin":
-        target_dir = os.path.expanduser(
-            "~/Library/Application Support/Google/Chrome/NativeMessagingHosts"
-        )
-        os.makedirs(target_dir, exist_ok=True)
-        manifest_path = write_manifest(os.path.join(target_dir, HOST_NAME + ".json"))
-        print("Wrote host manifest: %s" % manifest_path)
+        target_dirs = [
+            os.path.expanduser(
+                "~/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+            ),
+            os.path.expanduser(
+                "~/Library/Application Support/Microsoft Edge/NativeMessagingHosts"
+            ),
+        ]
+        for target_dir in target_dirs:
+            os.makedirs(target_dir, exist_ok=True)
+            manifest_path = write_manifest(os.path.join(target_dir, HOST_NAME + ".json"))
+            print("Wrote host manifest: %s" % manifest_path)
         print_macos_permission_notes()
     else:
         print("Unsupported platform: %s (Windows and macOS only)" % sys.platform)

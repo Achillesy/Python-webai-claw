@@ -35,8 +35,8 @@ on each machine separately.
 
 macOS protects Desktop, Documents, and Downloads with TCC. The host is launched
 by the browser, not by Terminal, so when those folders are needed, grant
-**Full Disk Access** to Google Chrome (or Microsoft Edge when its host
-registration is added). Quit and reopen the browser after changing the setting.
+**Full Disk Access** to Google Chrome or Microsoft Edge. Quit and reopen the
+browser after changing the setting.
 Terminal permission alone does not apply to the browser-launched host, and
 `sudo`/`chmod` cannot bypass TCC.
 

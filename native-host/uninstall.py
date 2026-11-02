@@ -2,8 +2,8 @@
 # webai-claw local host uninstaller.
 #
 # Removes:
-# 1. The Chrome Native Messaging registration (HKCU registry on Windows,
-#    the NativeMessagingHosts json on macOS).
+# 1. The Chrome and Edge Native Messaging registrations (HKCU registry on
+#    Windows, the NativeMessagingHosts json on macOS).
 # 2. ~/.webai-claw/ (host program, logs, skills, machine identity).
 # 3. The installed guide files in ~/webai-claw-skills/ (user files are kept).
 #
@@ -23,22 +23,33 @@ def unregister():
     if sys.platform == "win32":
         import winreg
 
-        key_path = "Software\\Google\\Chrome\\NativeMessagingHosts\\" + HOST_NAME
-        try:
-            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key_path)
-            print("Removed registry key: HKCU\\%s" % key_path)
-        except FileNotFoundError:
-            print("Registry key not present, skipping.")
+        key_paths = [
+            "Software\\Google\\Chrome\\NativeMessagingHosts\\" + HOST_NAME,
+            "Software\\Microsoft\\Edge\\NativeMessagingHosts\\" + HOST_NAME,
+        ]
+        for key_path in key_paths:
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key_path)
+                print("Removed registry key: HKCU\\%s" % key_path)
+            except FileNotFoundError:
+                print("Registry key not present, skipping: HKCU\\%s" % key_path)
     elif sys.platform == "darwin":
-        manifest = os.path.expanduser(
-            "~/Library/Application Support/Google/Chrome/NativeMessagingHosts/%s.json"
-            % HOST_NAME
-        )
-        if os.path.exists(manifest):
-            os.remove(manifest)
-            print("Removed host manifest: %s" % manifest)
-        else:
-            print("Host manifest not present, skipping.")
+        manifests = [
+            os.path.expanduser(
+                "~/Library/Application Support/Google/Chrome/NativeMessagingHosts/%s.json"
+                % HOST_NAME
+            ),
+            os.path.expanduser(
+                "~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/%s.json"
+                % HOST_NAME
+            ),
+        ]
+        for manifest in manifests:
+            if os.path.exists(manifest):
+                os.remove(manifest)
+                print("Removed host manifest: %s" % manifest)
+            else:
+                print("Host manifest not present, skipping: %s" % manifest)
     else:
         print("Unsupported platform: %s (Windows and macOS only)" % sys.platform)
         return 1
@@ -73,7 +84,7 @@ def remove_docs():
 
 def main():
     print("This will unregister the webai-claw native host and delete:")
-    print("  - the Chrome Native Messaging registration for %s" % HOST_NAME)
+    print("  - the Chrome and Edge Native Messaging registrations for %s" % HOST_NAME)
     print("  - %s" % INSTALL_DIR)
     print("  - the installed guide files in %s" % DOC_DIR)
     if "--yes" not in sys.argv:
