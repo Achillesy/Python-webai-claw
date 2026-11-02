@@ -121,6 +121,7 @@ The toolbar badge is intentionally minimal:
 - [Privacy](PRIVACY.md)
 - [Changelog](docs/CHANGELOG.md)
 - [1.2 roadmap](docs/ROADMAP-1.2.md)
+- [FreeCAD demo plan](docs/DEMO-FREECAD.md)
 
 The AI operator guide is [AI-AGENT.md](AI-AGENT.md). The installed copies are
 in `~/webai-claw-skills/`; Connect attaches `AI-AGENT.md` and a skill index
