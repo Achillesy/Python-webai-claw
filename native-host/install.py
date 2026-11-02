@@ -26,7 +26,8 @@ import uuid
 HOST_NAME = "com.webai.claw"
 EXTENSION_IDS = [
     "feifgnelfehkjlimiolepkmffgbjcong",  # dev build (unpacked)
-    # Chrome Web Store build: append its ID here after the first store upload.
+    "lfdedknlfjieigbinhilhhkcedadifdl",  # Chrome Web Store build (v1.1.8)
+    "aammomamjknhhblplamnipopncbfoeoh",  # Edge Add-ons build (v1.1.8)
 ]
 PROJECT_URL = "https://github.com/Achillesy/Python-webai-claw"
 try:
