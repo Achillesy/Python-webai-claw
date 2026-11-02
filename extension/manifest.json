@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "webai-claw",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Run local commands and upload files from DeepSeek or Muse chats via a user-installed native host.",
   "homepage_url": "https://github.com/Achillesy/Python-webai-claw",
   "action": {

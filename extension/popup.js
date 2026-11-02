@@ -14,8 +14,6 @@ var els = {
   connect: document.getElementById('connect'),
   disconnect: document.getElementById('disconnect'),
   interrupt: document.getElementById('interrupt'),
-  cont: document.getElementById('continue'),
-  stop: document.getElementById('stop'),
   auto: document.getElementById('autosend'),
   attachAuto: document.getElementById('attachauto'),
   mid: document.getElementById('mid'),
@@ -23,8 +21,6 @@ var els = {
   ping: document.getElementById('ping')
 };
 
-var paused = false;
-var pauseReason = '';
 var machineId = null;
 var notice = '';
 var noticeUntil = 0;
@@ -64,12 +60,10 @@ function fmtOwner(owner) {
 }
 
 chrome.storage.local.get(
-  ['mh_auto_send', 'mh_auto_send_attachments', 'mh_paused', 'mh_pause_reason'],
+  ['mh_auto_send', 'mh_auto_send_attachments'],
   function (res) {
     els.auto.checked = !(res && res.mh_auto_send === false);
     els.attachAuto.checked = !!(res && res.mh_auto_send_attachments === true);
-    paused = !!(res && res.mh_paused);
-    pauseReason = (res && res.mh_pause_reason) || '';
     refresh();
   }
 );
@@ -83,11 +77,7 @@ els.attachAuto.addEventListener('change', function () {
 
 chrome.storage.onChanged.addListener(function (changes, area) {
   if (area !== 'local') return;
-  if (changes.mh_paused) paused = !!changes.mh_paused.newValue;
-  if (changes.mh_pause_reason) {
-    pauseReason = changes.mh_pause_reason.newValue || '';
-  }
-  if (changes.mh_paused || changes.mh_pause_reason) refresh();
+  if (changes.mh_auto_send || changes.mh_auto_send_attachments) refresh();
 });
 
 function setState(text, cls) {
@@ -136,8 +126,6 @@ function render(st) {
     setState('host unavailable', 'err');
   } else if (st.connecting) {
     setState('connecting', 'warn');
-  } else if (paused) {
-    setState('paused', 'warn');
   } else if (elsewhere) {
     setState('connected elsewhere', 'warn');
   } else if (leaseState === 'running') {
@@ -156,15 +144,6 @@ function render(st) {
       : 'Host unavailable. Open Advanced and run Test Bridge.');
   } else if (st.connecting) {
     lines.push('Sending the connection handshake…');
-  }
-  if (paused) {
-    if (pauseReason === 'count') {
-      lines.push('Paused after 10 consecutive automatic sends.');
-    } else if (pauseReason === 'rate') {
-      lines.push('Paused by the 20-per-minute auto-send limit.');
-    } else {
-      lines.push('Paused. Choose Continue or Stop.');
-    }
   }
   if (elsewhere && !stale) {
     lines.push('Connected in another browser or tab: ' + fmtOwner(owner));
@@ -192,9 +171,7 @@ function render(st) {
     ? 'Connecting…'
     : (stale ? 'Clean up & Connect' : 'Connect');
   els.disconnect.hidden = !ownActive;
-  els.interrupt.hidden = !(ownActive && leaseState === 'running');
-  els.cont.hidden = !paused;
-  els.stop.hidden = !paused;
+  els.interrupt.hidden = !ownActive;
 
   var mid = host.machine_id || st.machine_id || null;
   if (mid) {
@@ -241,25 +218,6 @@ els.disconnect.addEventListener('click', function () {
 els.interrupt.addEventListener('click', function () {
   if (!window.confirm('Interrupt the running command?')) return;
   send('interrupt', {}, function () { refresh(); });
-});
-
-els.cont.addEventListener('click', function () {
-  send('continue', {}, function () {
-    paused = false;
-    pauseReason = '';
-    setNotice('Continuing.', 3000);
-    refresh();
-  });
-});
-
-els.stop.addEventListener('click', function () {
-  if (!window.confirm('Stop the current chain? Queued commands will be discarded.')) return;
-  send('stop', {}, function () {
-    paused = false;
-    pauseReason = '';
-    setNotice('Stopped.', 3000);
-    refresh();
-  });
 });
 
 // ---------- advanced: bridge test ----------
@@ -325,5 +283,5 @@ function copyMachineId(value) {
   }
 }
 
-// Keep the running/paused state fresh while the popup is open.
+// Keep the running state fresh while the popup is open.
 setInterval(refresh, 2500);

@@ -344,23 +344,25 @@ When reading a result:
 - on `missing/invalid host`, use the `host=<UUID>` shown by the extension and
   resend with a new `id`.
 
-## 6. Consecutive execution and pause
+## 6. Auto-send pacing and loop discipline
 
 - The user controls result auto-send in the popup. `Auto-send command results`
   is on by default and can be turned off.
 - `Auto-send attachments` is a separate option and is off by default.
-- After **10 consecutive automatic sends**, the extension pauses and posts:
-
-  ```text
-  [claw:paused] Paused after 10 consecutive automatic sends. Click Continue or Stop in the extension popup.
-  ```
-
-- When you see `[claw:paused]`, stop sending commands and wait for the user to
-  click **Continue** or **Stop**.
-- The extension also enforces a minimum two-second interval and a limit of
-  20 automatic sends per minute. Reaching either limit posts `[claw:paused]`.
-- If DeepSeek needs a handoff while paused, you may still send a `summary`
-  block. The extension allows only `summary` while paused.
+- The extension enforces a minimum 500 ms interval between automatic sends.
+  It does not impose a fixed round count or per-minute message limit, and it
+  does not send pause messages.
+- The user can press **Interrupt** at any time to stop the current command and
+  discard the active chain, or **Disconnect** to release the machine binding.
+- You own loop discipline:
+  - after each result, decide whether the user's task is complete; if it is,
+    stop issuing commands;
+  - do not automatically continue with unrelated next steps;
+  - batch independent work and avoid polling loops;
+  - if the same approach fails three times, stop and report to the user;
+  - for long-running work, report progress and wait for the user.
+- Do not rely on the extension to stop a runaway loop. The extension only
+  paces sends and provides Interrupt/Disconnect.
 
 ## 7. Long conversations
 
@@ -494,6 +496,8 @@ git status --short
 - Never write `session` or `ai`; the extension stamps them.
 - Default timeout 120s; autonomous maximum 1200s; explicit approval up to 7200s.
 - Above 20 minutes, stop and ask the user first.
+- Keep each automatic chain purposeful; the extension paces sends by 500 ms
+  but does not impose a fixed round limit.
 - Results return as plain text starting with `[claw:result]`.
 - On multiple machines, state the current `host`; the user can switch it.
 - Use `summary` for DeepSeek handoff; the next Connect includes it automatically.

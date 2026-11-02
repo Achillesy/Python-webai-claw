@@ -143,7 +143,7 @@ Routing uses the originating page port and `binding_id`. The content script
 re-checks that the page session and AI type still match before filling. Results
 are never guessed into another tab.
 
-## 5. Timeouts, auto-send, and pause
+## 5. Timeouts, auto-send, and pacing
 
 - Default timeout: 120 seconds.
 - Autonomous maximum: 1200 seconds.
@@ -155,6 +155,9 @@ are never guessed into another tab.
   popup.
 - `Auto-send attachments` is off by default. When off, attachments wait in the
   input box for the user to press Send. The popup setting is authoritative.
-- After 10 consecutive automatic sends the extension pauses and posts
-  `[claw:paused] ...`. The user chooses **Continue** or **Stop** in the popup.
-- Automatic sends have a two-second minimum interval and a 20-per-minute limit.
+- Automatic sends have a 500 ms minimum interval.
+- There is no fixed round count or per-minute message limit. The extension does
+  not send pause messages. The user can use **Interrupt** to stop the current
+  command and active chain, or **Disconnect** to release the binding.
+- Loop discipline belongs to the AI operator: stop when the task is complete,
+  avoid polling loops, and report after repeated failures.

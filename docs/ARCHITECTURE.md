@@ -23,7 +23,7 @@ extension/                      Chrome MV3
   ├─ adapters/<site>.js         DeepSeek and Muse adapters
   ├─ content.js                 block pickup, binding, dedup, fill-back
   ├─ background.js              service worker: lease control, queue, router
-  └─ popup.html/js              Connect, Disconnect, Interrupt, Continue, Stop
+  └─ popup.html/js              Connect, Disconnect, Interrupt
 
     │  Native Messaging (4-byte little-endian length-prefixed JSON)
     ▼
@@ -99,8 +99,9 @@ entry, and a host permission for that site. Supported sites in this release:
   POSIX, `taskkill /T /F` on Windows).
 - Timeouts: 120 seconds default, 1200 seconds autonomous maximum, 7200 seconds
   after explicit user approval.
-- Auto-send pauses after 10 consecutive sends and enforces a two-second minimum
-  interval and a 20-per-minute limit.
+- Auto-send enforces a 500 ms minimum interval. There is no fixed round count
+  or per-minute message limit; the AI operator owns loop discipline. Interrupt
+  aborts the active chain and Disconnect releases the binding.
 - `Auto-send command results` defaults on. `Auto-send attachments` defaults off.
   The popup setting is authoritative for results and AI-requested files. The
   Connect handshake is always sent automatically; the popup shows a connecting

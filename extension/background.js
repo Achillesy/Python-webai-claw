@@ -818,6 +818,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === "interrupt") {
     const bid = (activeBinding && activeBinding.binding_id) || msg.binding_id || "";
+    if (activeBinding) {
+      try { activeBinding.port.postMessage({ type: "popup_interrupt" }); } catch (e) {}
+    }
     if (running) {
       try {
         ensureNativePort().postMessage({ type: "kill", id: running.id, binding_id: bid,
@@ -831,28 +834,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } else {
       sendResponse({ ok: false, error: "no running task" });
     }
-    return true;
-  }
-
-  if (msg.type === "continue") {
-    if (!activeBinding) {
-      sendResponse({ ok: false, error: "this browser is not connected" });
-      return true;
-    }
-    try { activeBinding.port.postMessage({ type: "continue" }); } catch (e) {}
-    try { chrome.storage.local.set({ mh_paused: false, mh_pause_count: 0 }); } catch (e) {}
-    sendResponse({ ok: true });
-    return true;
-  }
-
-  if (msg.type === "stop") {
-    if (!activeBinding) {
-      sendResponse({ ok: false, error: "this browser is not connected" });
-      return true;
-    }
-    try { activeBinding.port.postMessage({ type: "popup_stop" }); } catch (e) {}
-    try { chrome.storage.local.set({ mh_paused: false, mh_pause_count: 0 }); } catch (e) {}
-    sendResponse({ ok: true });
     return true;
   }
 

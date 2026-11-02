@@ -88,19 +88,8 @@ var BINDING_ID = (function () {
 var bound = false;
 var boundSession = null;
 var boundAi = null;
-var paused = false;
-var autoSentCount = 0;
-var PAUSE_AFTER = 10;
-var MIN_AUTO_SEND_INTERVAL_MS = 2000;
-var MAX_AUTO_SENDS_PER_MINUTE = 20;
+var MIN_AUTO_SEND_INTERVAL_MS = 500;
 var lastAutoSendAt = 0;
-var autoSendTimes = [];
-
-function resetAutoSendState() {
-  autoSentCount = 0;
-  lastAutoSendAt = 0;
-  autoSendTimes = [];
-}
 
 function notifyWaiting(reason) {
   if (!bound) return;
@@ -185,7 +174,7 @@ function warnMissingHost(block) {
   try {
     if (adapter.fillResult(msg)) {
       sendWithRetry({ tag: 'host-warning', maxWaitMs: 8000, intervalMs: 400,
-                      respectAuto: false, respectPause: false, countAuto: false });
+                      respectAuto: false });
     }
   } catch (e) {}
 }
@@ -250,8 +239,8 @@ function abortChain(reason) {
   // are all swallowed: they won't resurrect when the chain re-arms; only truly new blocks execute.
   Object.keys(firstSeenAt).forEach(function (id) { markProcessed(id); });
   firstSeenAt = {};
-  // Also swallow v3 blocks that appeared while the extension was paused but
-  // were never scanned; otherwise Stop would let them execute afterwards.
+  // Also swallow v3 blocks that appeared before the interrupt but were never
+  // scanned; otherwise they could execute afterwards.
   try {
     adapter.findBlocks().forEach(function (el) {
       var b = parseBlock(elementText(el));
@@ -265,9 +254,6 @@ function abortChain(reason) {
   flushHardDeadline = 0;
   // generation +1: old-generation commands/results all expire; tell background to drop this session's queued items
   gen++;
-  paused = false;
-  resetAutoSendState();
-  setPauseStorage(false);
   try {
     getPort().postMessage({
       type: 'stop',
@@ -285,15 +271,15 @@ function abortChain(reason) {
 // and tells the AI to stop sending new blocks. Bypasses the mh_auto_send switch —
 // the user clicked stop by hand, so the notice must go out; on send failure, degrade to fill-only.
 function sendCancelNotice(curGen, nTimers, nFlight) {
-  var text = '⏹ [webai-claw] user clicked the stop button (auto-sent): all generation ' + curGen + ' commands are void' +
+  var text = '⏹ [webai-claw] user interrupted the current chain (auto-sent): all generation ' + curGen + ' commands are void' +
     ' (' + nTimers + ' pending cancelled, ' + nFlight + ' in-flight results will not be filled back).' +
-    'Please pause the current task, wait for the next user instruction, and do not send new command blocks.';
+    'Please stop the current task, wait for the next user instruction, and do not send new command blocks.';
   var ok = false;
   try { ok = adapter.fillResult(text); } catch (e) { ok = false; }
   if (ok) {
     console.log('[webai-claw] stop notice filled back, sending in 500ms');
-    sendWithRetry({ tag: 'stop-notice', maxWaitMs: 8000, intervalMs: 400,
-                    respectAuto: false, respectPause: false, countAuto: false });
+    sendWithRetry({ tag: 'interrupt-notice', maxWaitMs: 8000, intervalMs: 400,
+                    respectAuto: false });
   } else {
     console.log('[webai-claw] stop notice fill-back failed; logging only, not disturbing');
   }
@@ -514,7 +500,7 @@ function getPort() {
       bound = !!msg.bound;
       boundSession = bound ? normalizeSession(msg.session || '') : null;
       boundAi = bound ? (msg.ai || null) : null;
-      if (bound) { paused = false; resetAutoSendState(); setPauseStorage(false); }
+      if (bound) scan();
       console.log('[webai-claw] binding ' + (bound ? 'active: ' + boundSession + ' / ' + boundAi : 'released'));
       if (bound) scan();
       return;
@@ -523,15 +509,8 @@ function getPort() {
       sendConnectAttachment(msg.config || {});
       return;
     }
-    if (msg.type === 'continue') {
-      paused = false;
-      resetAutoSendState();
-      setPauseStorage(false);
-      scan();
-      return;
-    }
-    if (msg.type === 'popup_stop') {
-      abortChain('user clicked stop in popup');
+    if (msg.type === 'popup_interrupt') {
+      abortChain('user clicked interrupt in popup');
       return;
     }
     if (msg.type === 'file') {
@@ -562,8 +541,6 @@ function getPort() {
   pagePort.onDisconnect.addListener(function () {
     pagePort = null;
     bound = false;
-    paused = false;
-    setPauseStorage(false);
     Object.keys(inFlight).forEach(function (id) {
       fillBack('Connection to the extension background lost; result unknown.');
     });
@@ -724,7 +701,7 @@ function onFileArrived(msg) {
     sendWithRetry({
       tag: 'attach', maxWaitMs: 45000, intervalMs: 500,
       autoKey: ATTACH_AUTO_KEY, autoDefault: false,
-      respectAuto: true, respectPause: true, countAuto: true,
+      respectAuto: true,
       onSkip: function () { notifyWaiting('attachment-ready'); },
       failNote: '\n[webai-claw] attachment is ready but auto-send failed; press Send manually.'
     });
@@ -733,16 +710,6 @@ function onFileArrived(msg) {
   });
 }
 
-
-function setPauseStorage(on, reason) {
-  try {
-    var obj = {};
-    obj.mh_paused = !!on;
-    obj.mh_pause_count = on ? autoSentCount : 0;
-    obj.mh_pause_reason = on ? (reason || '') : '';
-    chrome.storage.local.set(obj);
-  } catch (e) {}
-}
 
 function shouldSendGuide(ai, hostVersion, cb) {
   if (ai !== 'muse') {
@@ -842,7 +809,7 @@ function sendConnectAttachment(config) {
       }
       sendWithRetry({
         tag: 'connect', maxWaitMs: 45000, intervalMs: 500,
-        respectAuto: false, respectPause: false, countAuto: false,
+        respectAuto: false,
         verifyDelayMs: 800,
         verify: function () {
           if (!adapter.isInputEmpty) return true;
@@ -1055,8 +1022,6 @@ function maybeAutoSend() {
     maxWaitMs: 10000,
     intervalMs: 400,
     respectAuto: true,
-    respectPause: true,
-    countAuto: true,
     onSkip: function () { notifyWaiting('result-ready'); }
   });
 }
@@ -1071,42 +1036,12 @@ function doClickSend() {
   return !!ok;
 }
 
-function pauseAutoSend(kind) {
-  if (paused) return;
-  paused = true;
-  setPauseStorage(true, kind);
-  notifyWaiting('paused');
-  var note;
-  if (kind === 'rate') {
-    note = '[claw:paused] Auto-send is rate-limited (' +
-      MAX_AUTO_SENDS_PER_MINUTE + '/min); paused. Click Continue or Stop in the extension popup.';
-  } else {
-    note = '[claw:paused] Paused after ' + PAUSE_AFTER +
-      ' consecutive automatic sends. Click Continue or Stop in the extension popup.';
-  }
-  var ok = false;
-  try { ok = adapter.fillResult(note); }
-  catch (e) { console.error('[webai-claw] pause note fill failed: ', e); }
-  if (ok) {
-    sendWithRetry({
-      tag: kind === 'rate' ? 'rate-pause-note' : 'pause-note',
-      maxWaitMs: 8000,
-      intervalMs: 400,
-      respectAuto: false,
-      respectPause: false,
-      countAuto: false
-    });
-  }
-}
-
 function sendWithRetry(opts) {
   opts = opts || {};
   var tag = opts.tag || 'auto-send';
   var maxWaitMs = opts.maxWaitMs || 10000;
   var intervalMs = opts.intervalMs || 400;
   var respectAuto = opts.respectAuto !== false;
-  var respectPause = opts.respectPause !== false;
-  var countAuto = opts.countAuto !== false;
   var autoKey = opts.autoKey || AUTO_KEY;
   var autoDefault = opts.autoDefault !== false;
 
@@ -1119,18 +1054,6 @@ function sendWithRetry(opts) {
 
   function begin() {
     if (contextDead) return;
-    if (respectPause && paused) {
-      skip('paused');
-      return;
-    }
-    if (countAuto) {
-      var now = Date.now();
-      autoSendTimes = autoSendTimes.filter(function (t) { return now - t < 60000; });
-      if (autoSendTimes.length >= MAX_AUTO_SENDS_PER_MINUTE) {
-        pauseAutoSend('rate');
-        return;
-      }
-    }
     var wait = MIN_AUTO_SEND_INTERVAL_MS - (Date.now() - lastAutoSendAt);
     if (wait > 0) {
       setTimeout(begin, wait);
@@ -1140,15 +1063,7 @@ function sendWithRetry(opts) {
 
     function succeed() {
       lastAutoSendAt = Date.now();
-      if (countAuto) {
-        autoSendTimes.push(lastAutoSendAt);
-        autoSentCount++;
-        console.log('[webai-claw] auto-sent ' + tag + ' (' +
-                    autoSentCount + '/' + PAUSE_AFTER + ')');
-        if (autoSentCount >= PAUSE_AFTER && !paused) pauseAutoSend('count');
-      } else {
-        console.log('[webai-claw] auto-sent ' + tag);
-      }
+      console.log('[webai-claw] auto-sent ' + tag);
       if (opts.onSent) {
         try { opts.onSent(); } catch (e) {}
       }
@@ -1165,10 +1080,6 @@ function sendWithRetry(opts) {
 
     (function attempt() {
       if (contextDead) return;
-      if (respectPause && paused) {
-        skip('paused');
-        return;
-      }
       var busy = false;
       try {
         if (adapter.isGenerating && adapter.isGenerating()) busy = true;
@@ -1283,8 +1194,6 @@ function scan() {
     var text = elementText(el);
     var block = parseBlock(text);
     if (!block || isProcessed(block.id) || inFlight[block.id]) return;
-    // While paused, still allow a summary block to write the handoff file.
-    if (paused && block.kind !== 'summary') return;
     if (inWarmup() || baselineIds[block.id] || isPlaceholderId(block.id)) {
       if (!baselineIds[block.id]) {
         baselineIds[block.id] = true;
@@ -1357,8 +1266,6 @@ document.addEventListener('click', function (e) {
   var t = e.target;
   var btn = t && t.closest ? t.closest('button, [role="button"]') : null;
   if (!btn) return;
-  // a real user click (not our auto-send) resets the consecutive auto-run counter
-  resetAutoSendState();
   if (!adapter.isStopButton || !adapter.isStopButton(btn)) return;
   abortChain('user clicked the stop/interrupt button');
 }, true);

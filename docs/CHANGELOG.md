@@ -3,6 +3,22 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.5] - 2026-11-02
+
+### Changed
+
+- Removed the fixed 10-send pause and 20-per-minute auto-send limit.
+- Removed the `[claw:paused]` chat message, Pause state, and Continue/Stop
+  controls. A pause is no longer part of the conversation flow.
+- Automatic sends now use a 500 ms minimum interval. The AI operator is
+  responsible for loop discipline and must stop when the task is complete.
+- Interrupt now aborts the active content chain and kills the current host
+  command. Disconnect remains the full stop/release path.
+
+### Versions
+
+- Extension and host bumped to 1.1.5.
+
 ## [1.1.4] - 2026-11-02
 
 ### Fixed

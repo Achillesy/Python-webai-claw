@@ -78,7 +78,9 @@ machine UUID and exact `"v":3`.
 - The **Connect** handshake is always sent automatically because it is the
   explicit action that establishes the connection; the two settings above do
   not apply to it.
-- **Interrupt**, **Continue**, and **Stop** control the current run.
+- Automatic result sends are paced by at least 500 ms. There is no fixed round
+  limit; the AI operator is responsible for stopping when the task is done.
+- **Interrupt** stops the current command and active chain. **Disconnect** releases the machine binding.
 - **Advanced** contains the machine UUID (for multi-machine switching) and **Test Bridge** diagnostics.
 
 The toolbar badge is intentionally minimal:
