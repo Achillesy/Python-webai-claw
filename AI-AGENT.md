@@ -10,8 +10,8 @@
 ## 0. Connect and confirm
 
 The user starts by clicking **Connect** in the extension popup. The extension
-uploads this guide and a local configuration to the chat. The configuration
-contains:
+uploads this guide and a local configuration to the chat. The local skill
+library is `~/webai-claw-skills/` (see §2.6). The configuration contains:
 
 - `host`: the UUID of this machine;
 - `hostname`: the machine name;
@@ -230,6 +230,79 @@ Write a summary when:
 - a stage is complete and needs a handoff;
 - the same task has made no progress for three or more attempts.
 
+## 2.6 Skill library
+
+The user-facing skill library is `~/webai-claw-skills/`. It is intentionally
+outside the hidden runtime directory so users can add capabilities without
+changing the extension.
+
+- `AI-AGENT.md` is this protocol, not a skill.
+- `AI-BLENDER.md` is the built-in Blender skill.
+- Any other `*.md` file is a user skill.
+
+When the user asks for a capability that may have a skill:
+
+1. If the request is clearly Blender, read `AI-BLENDER.md` directly.
+2. Otherwise list the available skills:
+
+   macOS/Linux:
+
+   ```sh
+   ls -1 ~/webai-claw-skills/*.md
+   ```
+
+   Windows PowerShell:
+
+   ```powershell
+   Get-ChildItem "$HOME\webai-claw-skills\*.md" | Select-Object -ExpandProperty Name
+   ```
+
+3. Match by file name and the frontmatter fields `name`, `description`, and
+   `triggers`.
+4. Read the selected skill with `exec`:
+
+   macOS/Linux:
+
+   ```sh
+   sed -n '1,260p' ~/webai-claw-skills/<skill>.md
+   ```
+
+   Windows PowerShell:
+
+   ```powershell
+   Get-Content -TotalCount 260 "$HOME\webai-claw-skills\<skill>.md"
+   ```
+
+5. Follow the skill as guidance. Every command it suggests still needs a fresh
+   `id`, the matching `host`, and `"v":3`; all timeouts and security rules still
+   apply.
+
+Do not ask the user to upload a skill file. Read it in place.
+
+A user skill should start with frontmatter:
+
+```markdown
+---
+name: blender
+description: Build, animate, or render a Blender scene through the local MCP bridge.
+triggers: blender, 3d, model, render, scene
+---
+
+# Blender skill
+...
+```
+
+Rules:
+
+- Keep skill files small (ideally under 8 KB); the result channel may clip long
+  output.
+- A skill is instructions for the AI, not a command block to execute blindly.
+  Inspect it first, and apply the normal security and approval rules.
+- If several skills match, ask the user which one to use.
+- Do not download or execute untrusted skill code.
+- To add a skill, the user only creates a `.md` file in
+  `~/webai-claw-skills/`; no extension change is needed.
+
 ## 3. Platform and shell
 
 The Connect attachment states:
@@ -441,6 +514,9 @@ Do not copy the entire conversation into a new chat. Use `summary`.
 - **host busy**: another task is running. Ask the user to wait or interrupt.
 - **Connection busy**: another tab or browser owns the host. Ask the user to
   disconnect there or wait for the task to finish.
+- **Skill not found**: list `~/webai-claw-skills/*.md`, check the file name and
+  frontmatter, and do not ask the user to upload the skill. Ask which skill to
+  use if several match.
 - **macOS `Operation not permitted` for Desktop, Documents, or Downloads**:
   this is macOS privacy protection (TCC), not a missing directory or a shell
   syntax error. Stop retrying; do not use `sudo`, `chmod`, or copy the folder.
@@ -511,3 +587,5 @@ git status --short
 - Results return as plain text starting with `[claw:result]`.
 - On multiple machines, state the current `host`; the user can switch it.
 - Use `summary` for DeepSeek handoff; the next Connect includes it automatically.
+- Skills live in `~/webai-claw-skills/`; read the matching `.md` with `exec`.
+  Users can add skills without changing the extension.

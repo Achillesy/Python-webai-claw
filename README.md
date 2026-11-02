@@ -12,6 +12,8 @@ Supported AI chat sites: **DeepSeek** (`chat.deepseek.com`) and **Muse**
 - Return command output to the same conversation.
 - Upload local files as real chat attachments when the AI asks.
 - Drive local applications such as Blender through their local APIs.
+- Discover user-extensible skills from `~/webai-claw-skills/` without changing
+  the extension.
 - Keep the execution target explicit when the same conversation is open on
   more than one computer.
 
@@ -58,6 +60,14 @@ The installer creates `~/.webai-claw/` for the host and runtime files, and
 `~/webai-claw-skills/` for user-facing guides. It registers the Native
 Messaging host with Chrome. It is idempotent; re-run it to update the host
 and guides.
+
+### Extending skills
+
+`~/webai-claw-skills/` is a visible skill library. `AI-BLENDER.md` is built in;
+users can add their own `*.md` skills with frontmatter fields `name`,
+`description`, and `triggers`. On a matching request, the AI lists the folder,
+reads the selected skill with `exec`, and follows it. No extension change or
+manual upload is required.
 
 ### 2. Install the extension
 
@@ -108,8 +118,10 @@ The toolbar badge is intentionally minimal:
 - [Changelog](docs/CHANGELOG.md)
 
 The AI operator guide is [AI-AGENT.md](AI-AGENT.md). The installed copies are
-in `~/webai-claw-skills/`; Connect attaches `AI-AGENT.md` automatically. For
-Blender workflows, upload `~/webai-claw-skills/AI-BLENDER.md` in the chat.
+in `~/webai-claw-skills/`; Connect attaches `AI-AGENT.md` automatically. The
+folder is also a user-extensible skill library: drop a `.md` skill there and
+the AI can discover it with `exec`, without changing the extension. For
+Blender workflows, ask the AI to use the Blender skill.
 
 ## Security
 

@@ -3,6 +3,20 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.8] - 2026-11-02
+
+### Added
+
+- `~/webai-claw-skills/` is now documented and used as a user-extensible skill
+  library. `AI-AGENT.md` explains dynamic discovery, frontmatter, loading with
+  `exec`, and security rules.
+- `AI-BLENDER.md` is loadable as a skill; users no longer need to upload it
+  manually.
+- Adding a skill only requires a new `.md` file in the skill library; no
+  extension change is needed.
+- Onboarding and README explain the Blender skill flow.
+- Extension and host bumped to 1.1.8.
+
 ## [1.1.7] - 2026-11-02
 
 ### Changed

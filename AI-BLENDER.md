@@ -5,7 +5,8 @@
 > needs `host` and exact `"v":3` as described in `AI-AGENT.md`.
 >
 > The user-facing installed copy is at `~/webai-claw-skills/AI-BLENDER.md`.
-> Upload that file when the task needs Blender.
+> This is a loadable skill: read it with `exec` when the task needs Blender;
+> manual upload is optional.
 
 ## 1. How the bridge works
 

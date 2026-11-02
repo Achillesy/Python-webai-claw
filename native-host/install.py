@@ -295,7 +295,7 @@ def main():
     print(
         "AI guides installed to %s\n"
         "  AI-AGENT.md: Connect attaches it automatically.\n"
-        "  AI-BLENDER.md: upload it manually for Blender tasks.\n"
+        "  AI-BLENDER.md: the AI reads it as the Blender skill; manual upload is optional.\n"
         "  User-facing files are outside the hidden install directory."
         % DOC_DIR
     )
