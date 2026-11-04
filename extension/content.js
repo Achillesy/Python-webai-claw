@@ -650,7 +650,9 @@ function writeFileBlock(block) {
   if (block.content.length > MAX_WRITE_BYTES) {
     markProcessed(block.id);
     fillBack('[claw:write_file] id=' + block.id + ' error=content too large (~' +
-      Math.round(block.content.length / 1024) + 'KB, cap 512KB); rejected');
+      Math.round(block.content.length / 1024) + 'KB, cap 512KB); rejected. ' +
+      'Do not append in chunks; create a small local generator/transformer ' +
+      'script with write_file and run it with exec, or use a dedicated editor.');
     return;
   }
   inFlight[block.id] = true;

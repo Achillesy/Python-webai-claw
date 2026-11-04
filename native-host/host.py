@@ -32,7 +32,7 @@ import time
 import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "1.2.2"
+HOST_VERSION = "1.2.3"
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")
 RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
@@ -880,7 +880,10 @@ def run_write_file(msg):
         return {"type": "error", "id": rid, "error": "content decode failed: %r" % (e,)}
     if len(data) > MAX_WRITE_BYTES:
         return {"type": "error", "id": rid,
-                "error": "write payload too large: %d bytes (cap %d)" %
+                "error": "write payload too large: %d bytes (cap %d); "
+                         "do not append in chunks; create a small local "
+                         "generator/transformer script with write_file and run "
+                         "it with exec, or use a dedicated editor" %
                          (len(data), MAX_WRITE_BYTES)}
     target = os.path.abspath(os.path.expanduser(path))
     low = target.lower()
@@ -906,7 +909,8 @@ def run_write_file(msg):
     exists = os.path.exists(target)
     if exists and msg.get("overwrite") is not True:
         return {"type": "error", "id": rid,
-                "error": "target exists; resend with overwrite=true after user confirmation"}
+                "error": "target exists; read it first, then resend with "
+                         "overwrite=true and the old expected_sha256"}
     old = b""
     old_sha = None
     if exists:
@@ -917,7 +921,11 @@ def run_write_file(msg):
         except OSError as e:
             return {"type": "error", "id": rid, "error": "read existing file failed: %r" % (e,)}
         expected = (msg.get("expected_sha256") or "").strip().lower()
-        if expected and expected != old_sha:
+        if not expected:
+            return {"type": "error", "id": rid,
+                    "error": "overwrite requires expected_sha256; read the file "
+                             "first and resend with its current SHA-256"}
+        if expected != old_sha:
             return {"type": "error", "id": rid,
                     "error": "expected_sha256 mismatch; file changed, re-read and retry"}
     new_sha = hashlib.sha256(data).hexdigest()
@@ -954,15 +962,17 @@ def run_write_file(msg):
         except OSError:
             pass
         return {"type": "error", "id": rid, "error": "write failed: %r" % (e,)}
-    summary = ("wrote %s\nsize: %d bytes\nsha256: %s\nbackup: %s" %
-               (target, len(data), new_sha, backup_path or "none"))
+    old_size = len(old) if exists else 0
+    summary = ("wrote %s\nold_size: %d bytes\nnew_size: %d bytes\nsha256: %s\nbackup: %s" %
+               (target, old_size, len(data), new_sha, backup_path or "none"))
     result = {
         "type": "result", "id": rid,
         "hostname": socket.gethostname(), "machine_id": MACHINE_ID,
         "session": msg.get("session") or "", "ai": msg.get("ai") or "",
         "ok": True, "exit_code": 0, "stdout": summary, "stderr": "",
         "duration_ms": int((time.time() - started) * 1000),
-        "path": target, "size": len(data), "sha256": new_sha,
+        "path": target, "size": len(data), "old_size": old_size,
+        "sha256": new_sha, "old_sha256": old_sha,
         "backup": backup_path, "changed": old_sha != new_sha,
     }
     session_key = _session_key(msg.get("session") or "")

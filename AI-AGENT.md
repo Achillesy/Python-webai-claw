@@ -186,7 +186,7 @@ writes through a host-side temporary file and atomically replaces the target;
 it is not a shell redirection.
 
 ```claw
-{"claw":"write_file","id":"example-write-006","host":"<UUID>","path":"/Users/me/project/config.json","content":"{\n  \"enabled\": true\n}\n","overwrite":true,"v":3}
+{"claw":"write_file","id":"example-write-006","host":"<UUID>","path":"/Users/me/project/config.json","content":"{\n  \"enabled\": true\n}\n","v":3}
 ```
 
 Fields:
@@ -197,7 +197,8 @@ Fields:
 - `encoding`: `utf8` (default) or `base64` for binary content.
 - `overwrite`: must be boolean `true` when the target already exists. For a new
   file, omit it or set it to `false`.
-- `expected_sha256`: optional old-file SHA-256. The write is rejected if the
+- `expected_sha256`: **required when `overwrite` is true**. It must be the
+  current old-file SHA-256. The write is rejected if it is missing or if the
   file changed after you read it.
 - `backup`: defaults to true. Set to `false` only when the user explicitly
   agrees; backups stay next to the target with a
@@ -206,18 +207,20 @@ Fields:
 Rules:
 
 - Read the target first if it exists; show the user a short diff or summary
-  before overwriting.
+  before overwriting. For an existing file, send `overwrite:true` and the old
+  `expected_sha256`.
 - Prefer `write_file` for a complete replacement of a small or medium file.
   Do not use `sed -i`, `perl -pi`, `cat >`, `Set-Content`, or append loops for
   that task when `write_file` is available.
-- Use shell patch scripts only for targeted edits to files too large for
-  `write_file`, or when the user explicitly asks for a patch workflow.
-- The raw payload cap is 512 KB. If the complete file is larger, split the task
-  or use a verified patch workflow; never leave a truncated file.
+- The raw payload cap is 512 KB. If the complete file is larger, do **not**
+  append it in chunks and do not create a partial file. Write a small local
+  generator or transformer script with `write_file`, run that script with
+  `exec`, and verify the result. If the task is not suitable for a local
+  script, ask the user to use a dedicated editor.
 - Sensitive paths are refused. Do not write secrets, tokens, passwords, cookies,
   `.ssh`, `.aws`, `.env`, or private keys.
-- The host writes atomically and returns the new SHA-256, size, and backup path.
-  Verify the result before continuing.
+- The host writes atomically and returns old/new sizes, old/new SHA-256, and
+  the backup path. Verify the result before continuing.
 - A write is a system change. Ask for explicit user confirmation before
   overwriting or creating a file unless the user already requested that exact
   change.
@@ -603,8 +606,10 @@ Do not copy the entire conversation into a new chat. Use `summary`.
   upload is still in progress, or the send button is not ready. Wait for the
   user; do not resend the same attach repeatedly.
 - **Truncated command**: keep blocks short. For complete file changes, use
-  `write_file` instead of chunked shell appends. For files over the write
-  cap, use a verified patch workflow and never leave a partial file.
+  `write_file` instead of chunked shell appends. For files over the 512 KB
+  write cap, write a small local generator/transformer script with
+  `write_file`, run it with `exec`, and verify the result; never leave a
+  partial file.
 - **Wrong shell syntax**: read `platform` and `shell` from Connect.
 - **host busy**: another task is running. Ask the user to wait or interrupt.
 - **Connection busy**: another tab or browser owns the host. Ask the user to

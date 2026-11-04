@@ -3,6 +3,22 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.3] - 2026-11-04
+
+### Changed
+
+- `write_file` now requires `expected_sha256` when overwriting an existing
+  file. A missing or stale hash rejects the write.
+- Large-file errors now tell the AI to write a small local
+  generator/transformer script and run it with `exec`, instead of appending in
+  chunks.
+- Write results now include `old_size`, `new_size`, `old_sha256`, and the new
+  `sha256`.
+- AI-AGENT now treats `write_file` as a small-file tool and forbids chunked
+  append fallbacks for oversized writes.
+- No SSH, chunked-write, or large-file patch feature was added.
+- Extension and host bumped to 1.2.3.
+
 ## [1.2.2] - 2026-11-02
 
 ### Added

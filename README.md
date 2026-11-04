@@ -11,8 +11,9 @@ Supported AI chat sites: **DeepSeek** (`chat.deepseek.com`) and **Muse**
 - Run shell commands on macOS or Windows from a web AI chat.
 - Return command output to the same conversation.
 - Upload local files as real chat attachments when the AI asks.
-- Create or replace local files atomically with `write_file`, with backup
-  and hash validation.
+- Create or replace small local files atomically with `write_file`, with backup
+  and hash validation. For larger files, use a local generator/transformer
+  script through `write_file` + `exec` rather than chunked appends.
 - Drive local applications such as Blender through their local APIs.
 - Discover user-extensible skills from `~/webai-claw-skills/` without changing
   the extension.

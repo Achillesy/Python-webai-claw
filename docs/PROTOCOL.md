@@ -58,14 +58,19 @@ controlled only by the user's popup setting.
 - `content`: complete file content as a JSON string; `""` creates an empty file.
 - `encoding`: `utf8` (default) or `base64`.
 - `overwrite`: must be `true` when the target exists.
-- `expected_sha256`: optional old-file hash; a mismatch rejects the write.
+- `expected_sha256`: required with `overwrite:true`; the current old-file hash.
+  A missing or mismatched hash rejects the write.
 - `backup`: defaults to true; backups are stored next to the target with a
   `.webai-claw.bak.<timestamp>` suffix.
 
 The host writes through a same-directory temporary file and atomically replaces
 the target with `os.replace`. It refuses sensitive paths, symlinks, directories,
-and payloads above 512 KB. The result includes `path`, `size`, `sha256`,
-`backup`, and `changed`.
+and payloads above 512 KB. The result includes `path`, `size`, `old_size`,
+`sha256`, `old_sha256`, `backup`, and `changed`.
+
+`write_file` is for small files, configuration, scripts, documents, and skills.
+Above 512 KB, do not append in chunks: create a small local generator or
+transformer script with `write_file`, run it with `exec`, and verify the output.
 
 Writes to `~/webai-claw-skills/custom/*.md` are additionally validated as
 skills: frontmatter must contain a non-empty `name` and `description`. Root
@@ -131,7 +136,7 @@ length-prefixed UTF-8.
 | `{type:"cancel", id, binding_id}` | `{type:"result", ok}` for a foreign lease |
 | `{type:"summary", id, host, text, binding_id, session, ai}` | `{type:"result", kind:"summary", ...}` |
 | `{type:"read_file", id, host, path, binding_id, session, ai}` | `{type:"file_chunk", ...}` chunks / `error` |
-| `{type:"write_file", id, host, path, content, encoding?, overwrite?, expected_sha256?, backup?, binding_id, session, ai}` | `{type:"result", ...}` / `{type:"error", ...}` |
+| `{type:"write_file", id, host, path, content, encoding?, overwrite?, expected_sha256?, backup?, binding_id, session, ai}` | `{type:"result", ...}` / `{type:"error", ...}`; `expected_sha256` is required with `overwrite:true` |
 | `{type:"diag", id, host, binding_id, session, ai}` | `{type:"result", ...}` |
 
 Exec result fields: `id`, `ok`, `exit_code`, `stdout`, `stderr`, `duration_ms`,
