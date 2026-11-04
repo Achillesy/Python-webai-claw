@@ -20,18 +20,25 @@ AI chat page
     │  claw block (v3, one JSON header line)
     ▼
 extension/                      Chrome MV3
+  ├─ protocol.js                shared v3 block parser and kind list
   ├─ adapters/<site>.js         DeepSeek and Muse adapters
   ├─ content.js                 block pickup, binding, dedup, fill-back
   ├─ background.js              service worker: lease control, queue, router
+  ├─ background-ui.js           badge and notification helpers
   └─ popup.html/js              Connect, Disconnect, Interrupt
 
     │  Native Messaging (4-byte little-endian length-prefixed JSON)
     ▼
-native-host/host.py             Python standard library only
+native-host/host.py             Python standard library only; entry point
+  ├─ hostlib/constants.py       paths, limits, and deny lists
+  ├─ hostlib/skills.py          skill parsing, validation, and index
   ├─ command executor           shell subprocess, timeout, process-tree kill
   ├─ machine identity           ~/.webai-claw/machine.json (install time)
   ├─ machine lease              ~/.webai-claw/runtime/active.json
   └─ execution history          ~/.webai-claw/log/exec_history.jsonl
+
+protocol/v3.schema.json         machine-readable command block schema
+tests/                          stdlib unittest regression tests
 
 native-host/install.py          idempotent per-machine installer
 native-host/uninstall.py        symmetric removal

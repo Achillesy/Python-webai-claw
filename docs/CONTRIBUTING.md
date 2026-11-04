@@ -6,7 +6,7 @@ Thanks for helping out. This project is small on purpose — please keep it that
 
 - **One thing at a time.** Small, focused PRs beat big rewrites.
 - **No new dependencies** in `native-host/` without discussion. The host must stay
-  a single-file-ish Python script with stdlib only.
+  a stdlib-only Python package (`host.py` entry point plus `hostlib/`).
 - **Security first.** The host runs shell commands on the user's machine. Any PR
   touching `host.py`, the native-messaging boundary, or file access must explain
   its security implications. When in doubt, fail closed.
@@ -21,6 +21,11 @@ Thanks for helping out. This project is small on purpose — please keep it that
 3. Install the host: `python3 native-host/install.py` (macOS/Linux) or run
    `native-host/install_windows.bat` (Windows).
 4. Click the extension icon → "Test Bridge" → shows `connected: <hostname>`.
+5. Run the full local test script:
+
+   ```bash
+   sh tests/run_all.sh
+   ```
 
 After changing extension code: **reload the extension** in `chrome://extensions`
 (page refresh alone is not enough — the service worker keeps the old code).
@@ -43,12 +48,13 @@ After changing `host.py`: reload the extension so it respawns the host.
 ## Block protocol
 
 AI assistants talk to the bridge with fenced `claw` code blocks and exact
-`"v":3` (`AI-AGENT.md`). The five kinds are:
+`"v":3` (`AI-AGENT.md`). The six kinds are:
 
 - `{"claw":"exec", ...}` — run a shell command on the host
 - `{"claw":"probe", ...}` — read-only DOM inspection (page-local, never hits host)
 - `{"claw":"attach", ...}` — upload a local file as a chat attachment
 - `{"claw":"diag", ...}` — host/lease/history diagnostics
+- `{"claw":"write_file", ...}` — create or replace a small local file atomically
 - `{"claw":"summary", ...}` — write the handoff summary for the next Connect
 
 Protocol v3 is intentionally strict. New block kinds need a section in
@@ -56,14 +62,13 @@ Protocol v3 is intentionally strict. New block kinds need a section in
 
 ## Release (Chrome Web Store)
 
-See `store/` for the build script and listing materials. In short:
+Store packaging and submission are handled by the release owner. Do not commit
+generated zips; `store/` remains the reference for listing materials and a
+reproducible build check.
 
-1. `bash store/build.sh` produces a store-ready zip and strips the dev `key`
-   so the store assigns a fresh extension ID.
-2. Upload it in the Chrome Web Store developer dashboard with the listing,
-   privacy policy, and screenshots from `store/`.
-3. After the store assigns the ID, add it to the host allowlist in
-   `native-host/install.py` and tell users to re-run install.
+If the release owner needs a package, `bash store/build.sh` produces it. After
+the store assigns an extension ID, add it to the host allowlist in
+`native-host/install.py` and tell users to re-run the installer.
 
 ## License
 

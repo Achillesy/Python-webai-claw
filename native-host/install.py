@@ -39,8 +39,11 @@ except NameError:
     HERE = None
 INSTALL_DIR = os.path.expanduser("~/.webai-claw")
 DOC_DIR = os.path.expanduser("~/webai-claw-skills")
-HOST_FILES = ["host.py", "host.sh", "host.bat",
-              "skill/mcp_exec.py"]  # Blender MCP socket client
+HOST_FILES = [
+    "host.py", "host.sh", "host.bat",
+    "hostlib/__init__.py", "hostlib/constants.py", "hostlib/skills.py",
+    "skill/mcp_exec.py",
+]  # Blender MCP socket client
 # AI operator guides live at the repo root, not under native-host/.
 DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md", "AI-MACOS.md", "AI-WIN.md"]
 # Where to fetch the host program when install.py is downloaded standalone
@@ -120,6 +123,7 @@ def _download_one(name, base, mirrors=None, dst_dir=None):
     target_dir = dst_dir or INSTALL_DIR
     os.makedirs(target_dir, exist_ok=True)
     dst = os.path.join(target_dir, name)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
     for b in [base] + list(mirrors or []):
         url = "%s/%s" % (b, name)
         try:
@@ -139,7 +143,10 @@ def fetch_files():
     net_base = None
     if HERE and all(os.path.exists(os.path.join(HERE, n)) for n in HOST_FILES):
         for name in HOST_FILES:
-            shutil.copy2(os.path.join(HERE, name), os.path.join(INSTALL_DIR, name))
+            src = os.path.join(HERE, name)
+            dst = os.path.join(INSTALL_DIR, name)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
         print("Copied host files from %s" % HERE)
     else:
         net_base = _net_base_or_raise()

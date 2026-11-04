@@ -3,6 +3,19 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.4] - 2026-11-04
+
+### Changed
+
+- Split host constants and skill helpers into `native-host/hostlib/`.
+- Added the shared extension parser `extension/protocol.js`; content now uses
+  the same v3 kind list and parser as the protocol documentation.
+- Added `protocol/v3.schema.json` and stdlib schema regression tests.
+- Moved human-facing examples to `docs/AI-AGENT-EXAMPLES.md`; the runtime guide
+  remains focused on execution.
+- Updated installer file copying for `hostlib/` and documented module layout.
+- Extension and host bumped to 1.2.4.
+
 ## [1.2.3] - 2026-11-04
 
 ### Changed

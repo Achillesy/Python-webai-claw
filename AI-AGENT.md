@@ -91,7 +91,7 @@ Rules:
   extension skips example IDs. Real commands must use a new unique ID and the
   real UUID, or they will not execute.
 
-## 2. Five kinds
+## 2. Command kinds
 
 All kinds require `host` and `v:3`.
 
@@ -626,53 +626,7 @@ Do not copy the entire conversation into a new chat. Use `summary`.
   then retry with a new `id`. Terminal permission alone does not apply unless
   the host was started manually from Terminal.
 
-## 10. Examples
-
-### List a directory
-
-```claw
-{"claw":"exec","id":"example-list-011","host":"<UUID>","cmd":"ls -la ~","v":3}
-```
-
-Windows:
-
-```claw
-{"claw":"exec","id":"example-list-012","host":"<UUID>","cmd":"Get-ChildItem $HOME","v":3}
-```
-
-### System information
-
-macOS:
-
-```claw
-{"claw":"exec","id":"example-sys-013","host":"<UUID>","cmd":"sw_vers && uname -m && df -h","v":3}
-```
-
-Windows:
-
-```claw
-{"claw":"exec","id":"example-sys-014","host":"<UUID>","cmd":"Get-ComputerInfo | Select-Object WindowsProductName,OsVersion,CsSystemType","v":3}
-```
-
-### Git status
-
-```claw
-{"claw":"exec","id":"example-git-015","host":"<UUID>","v":3}
-cd ~/Workspace/Python/webai-claw
-git status --short
-```
-
-### Send a file to the user
-
-```claw
-{"claw":"attach","id":"example-att-016","host":"<UUID>","path":"~/Downloads/report.pdf","text":"Source report","v":3}
-```
-
-### Diagnose a silent run
-
-```claw
-{"claw":"diag","id":"example-diag-017","host":"<UUID>","v":3}
-```
+Human-facing examples are in `docs/AI-AGENT-EXAMPLES.md`; the runtime guide above is sufficient for command execution.
 
 ## Summary
 

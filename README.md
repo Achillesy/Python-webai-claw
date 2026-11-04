@@ -116,6 +116,8 @@ The toolbar badge is intentionally minimal:
 ## Protocol and design
 
 - [Protocol v3](docs/PROTOCOL.md)
+- [Protocol v3 JSON Schema](protocol/v3.schema.json)
+- [AI-AGENT examples](docs/AI-AGENT-EXAMPLES.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Interaction diagrams (Mermaid)](docs/UML.md)
 - [Contributing](docs/CONTRIBUTING.md)

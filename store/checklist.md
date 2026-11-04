@@ -3,7 +3,7 @@
 ## Ready in the repository
 
 - [x] Extension package: run `bash store/build.sh`; the version comes from
-      `extension/manifest.json` (currently 1.2.3). The build strips the dev
+      `extension/manifest.json` (currently 1.2.4). The build strips the dev
       `key`; the first store upload assigns the store extension ID.
 - [x] Icons 16/48/128 under `extension/icons/`, referenced by the manifest.
 - [x] English store description: `store/listing-en.txt`.

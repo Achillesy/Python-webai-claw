@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Achillesy/Python-webai-claw/protocol/v3.schema.json",
+  "title": "webai-claw command block v3",
+  "description": "Schema for the JSON head of a claw fenced block. Multi-line command bodies are outside the JSON object and are documented in docs/PROTOCOL.md.",
+  "type": "object",
+  "$defs": {
+    "commandId": {
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 160 },
+        { "type": "integer" }
+      ]
+    },
+    "hostUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "base": {
+      "type": "object",
+      "required": ["claw", "id", "host", "v"],
+      "properties": {
+        "claw": { "type": "string" },
+        "id": { "$ref": "#/$defs/commandId" },
+        "host": { "$ref": "#/$defs/hostUuid" },
+        "v": { "const": 3 }
+      }
+    },
+    "exec": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "properties": {
+            "claw": { "const": "exec" },
+            "cmd": { "type": "string", "maxLength": 524288 },
+            "timeout": { "type": "integer", "minimum": 1, "maximum": 7200 },
+            "approved": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "probe": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "required": ["sel"],
+          "properties": {
+            "claw": { "const": "probe" },
+            "sel": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "attach": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "required": ["path"],
+          "properties": {
+            "claw": { "const": "attach" },
+            "path": { "type": "string", "minLength": 1 },
+            "text": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "diag": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "properties": {
+            "claw": { "const": "diag" }
+          }
+        }
+      ]
+    },
+    "summary": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "properties": {
+            "claw": { "const": "summary" },
+            "text": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "writeFile": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "required": ["path", "content"],
+          "properties": {
+            "claw": { "const": "write_file" },
+            "path": { "type": "string", "minLength": 1 },
+            "content": { "type": "string", "maxLength": 524288 },
+            "encoding": { "enum": ["utf8", "base64"] },
+            "overwrite": { "type": "boolean" },
+            "expected_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{64}$"
+            },
+            "backup": { "type": "boolean" }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/exec" },
+    { "$ref": "#/$defs/probe" },
+    { "$ref": "#/$defs/attach" },
+    { "$ref": "#/$defs/diag" },
+    { "$ref": "#/$defs/summary" },
+    { "$ref": "#/$defs/writeFile" }
+  ]
+}

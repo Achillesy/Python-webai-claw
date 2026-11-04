@@ -31,52 +31,14 @@ import threading
 import time
 import uuid
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOST_VERSION = "1.2.3"
-LOG_DIR = os.path.join(BASE_DIR, "log")
-LOG_PATH = os.path.join(LOG_DIR, "host.log")
-RUNTIME_DIR = os.path.join(BASE_DIR, "runtime")
-LEASE_PATH = os.path.join(RUNTIME_DIR, "active.json")
-LEASE_LOCK = os.path.join(RUNTIME_DIR, "active.lock")
-HANDOFF_PATH = os.path.join(BASE_DIR, "handoff.md")
-SKILLS_DIR = os.path.join(os.path.expanduser("~"), "webai-claw-skills")
-CUSTOM_SKILLS_DIR = os.path.join(SKILLS_DIR, "custom")
-MAX_SKILL_BYTES = 32 * 1024
-SKILL_INDEX_MAX = 50
-SKILL_DESC_MAX = 160
-SKILL_INDEX_MAX_BYTES = 8 * 1024
-LEASE_SCHEMA = 1
-HEARTBEAT_INTERVAL = 5.0  # seconds
-LEASE_STALE_SECONDS = 30.0  # host heartbeat age before another browser may take over
-LEASE_LOCK_STALE = 10  # seconds; a crashed holder's lock file is removable after this
-DEFAULT_TIMEOUT = 120  # seconds; default for ordinary commands
-AUTO_TIMEOUT_MAX = 1200  # seconds; AI may set up to 20 min without explicit user approval
-APPROVED_TIMEOUT_MAX = 7200  # seconds; hard ceiling after the user explicitly approves
-HOST_CWD = os.path.expanduser("~")  # fixed cwd: predictable, idempotent
-HISTORY_PATH = os.path.join(LOG_DIR, "exec_history.jsonl")
-HISTORY_LOCK = os.path.join(LOG_DIR, "exec_history.lock")
-HISTORY_LIMIT = 500  # keep the most recent 500 (session,id) execution records
-HISTORY_MAX_BYTES = 1 * 1024 * 1024  # compact when the JSONL file grows past 1MB
-HISTORY_LOCK_STALE = 10  # seconds; a crashed holder's lock file is removable after this
-# Privacy note (2026-11-01): HISTORY is a key table for idempotent dedup,
-# not an audit archive. It stores metadata only: id, session fingerprint,
-# AI type, exit code, duration, timestamp, and lengths. Command text and
-# output text are never persisted; full output is filled back into the page.
-MAX_FILE_SIZE = 25 * 1024 * 1024  # single-file cap 25MB
-MAX_CMD_BYTES = 512 * 1024  # single-command cap 512KB (Chrome native message hard limit is 1MB; keep margin; matches the extension side)
-MAX_WRITE_BYTES = 512 * 1024  # write_file raw payload cap; larger files need a future chunked writer
-CHUNK_B64 = 500 * 1024  # base64 chars per chunk (raw ~375KB; keep margin under the 1MB message limit)
-FILE_DENY = (
-    "/.ssh/", "/.aws/", "/.gnupg/", "/.config/gcloud/",
-    "id_rsa", "id_ed25519", "id_ecdsa", ".pem", ".key", ".p12",
-    "/.env", "credentials", "keychain", "cookies", "login data",
-    "/etc/shadow", "/etc/sudoers", ".netrc", ".pgpass",
+from hostlib.constants import *  # noqa: F401,F403
+from hostlib.skills import (
+    custom_skill_error,
+    inside_dir,
+    is_preset_skill_path,
+    read_text_file,
+    skill_index,
 )
-# Machine identity: install-time only. install.py creates machine.json
-# once (first-writer-wins); host.py is read-only and fails fast if it is
-# missing. Runtime generation is intentionally gone: a swallowed write
-# error used to produce a fresh UUID per host process.
-MACHINE_ID_PATH = os.path.join(BASE_DIR, "machine.json")
 
 
 LOG_LOCK = threading.Lock()
@@ -798,47 +760,6 @@ def run_exec(msg, cancel_event=None):
     return res
 
 
-def _inside_dir(path, directory):
-    try:
-        path = os.path.abspath(path)
-        directory = os.path.abspath(directory)
-        return os.path.commonpath([path, directory]) == directory
-    except ValueError:
-        return False
-
-
-def _custom_skill_error(data):
-    """Return an error string for an invalid custom skill, or None."""
-    if len(data) > MAX_SKILL_BYTES:
-        return "custom skill too large: %d bytes (cap %d)" % (len(data), MAX_SKILL_BYTES)
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return "custom skill must be UTF-8 text"
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return "custom skill needs frontmatter with name and description"
-    meta = {}
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key = key.strip().lower()
-        if key in ("name", "description"):
-            meta[key] = value.strip().strip('"').strip("'")
-    if not meta.get("name") or not meta.get("description"):
-        return "custom skill frontmatter needs non-empty name and description"
-    return None
-
-
-def _preset_skill_name(target):
-    return (os.path.dirname(os.path.abspath(target)) == os.path.abspath(SKILLS_DIR) and
-            os.path.basename(target) in ("AI-AGENT.md", "AI-BLENDER.md",
-                                         "AI-MACOS.md", "AI-WIN.md"))
-
-
 def run_write_file(msg):
     """Atomically replace or create one file after validating the request."""
     rid = msg.get("id")
@@ -898,12 +819,12 @@ def run_write_file(msg):
     parent = os.path.dirname(target)
     if not os.path.isdir(parent):
         return {"type": "error", "id": rid, "error": "parent directory does not exist"}
-    if _preset_skill_name(target):
+    if is_preset_skill_path(target):
         return {"type": "error", "id": rid,
                 "error": "preset skills are installer-managed; copy the skill into custom/"}
-    if (_inside_dir(target, CUSTOM_SKILLS_DIR) and target.endswith(".md") and
+    if (inside_dir(target, CUSTOM_SKILLS_DIR) and target.endswith(".md") and
             os.path.basename(target) != "README.md"):
-        skill_error = _custom_skill_error(data)
+        skill_error = custom_skill_error(data)
         if skill_error:
             return {"type": "error", "id": rid, "error": skill_error}
     exists = os.path.exists(target)
@@ -1066,105 +987,6 @@ def _target_ok(msg):
     return host.strip().lower() == (MACHINE_ID or "").lower()
 
 
-def _read_text_file(path, limit=512 * 1024):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read(limit)
-    except OSError:
-        return ""
-
-
-def _skill_platform():
-    if sys.platform == "darwin":
-        return "macos"
-    if sys.platform == "win32":
-        return "windows"
-    return "linux"
-
-
-def _parse_skill(path):
-    """Read only the frontmatter and return bounded metadata."""
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            first = f.readline()
-            if first.strip() != "---":
-                return None
-            meta = {}
-            for _ in range(160):
-                line = f.readline()
-                if not line:
-                    break
-                if line.strip() == "---":
-                    break
-                if ":" not in line:
-                    continue
-                key, value = line.split(":", 1)
-                key = key.strip().lower()
-                value = value.strip().strip('"').strip("'")
-                if key in ("name", "description", "triggers", "platforms", "version"):
-                    meta[key] = value
-    except OSError:
-        return None
-    name = (meta.get("name") or "").strip()
-    desc = (meta.get("description") or "").strip()
-    if not name or not desc:
-        return None
-    triggers = []
-    for item in (meta.get("triggers") or "").strip("[]").split(","):
-        item = item.strip()
-        if item and item not in triggers:
-            triggers.append(item)
-    platforms = []
-    for item in (meta.get("platforms") or "any").strip("[]").split(","):
-        item = item.strip().lower()
-        if item and item not in platforms:
-            platforms.append(item)
-    if not platforms:
-        platforms = ["any"]
-    current = _skill_platform()
-    if "any" not in platforms and current not in platforms:
-        return None
-    rel = os.path.relpath(path, SKILLS_DIR).replace(os.sep, "/")
-    return {
-        "name": name[:80],
-        "description": desc[:SKILL_DESC_MAX],
-        "triggers": triggers[:8],
-        "platforms": platforms[:4],
-        "version": (meta.get("version") or "1")[:16],
-        "path": "~/webai-claw-skills/" + rel,
-        "source": "custom" if rel.startswith("custom/") else "preset",
-    }
-
-
-def _skill_index():
-    by_name = {}
-    for directory, source in ((SKILLS_DIR, "preset"),
-                              (os.path.join(SKILLS_DIR, "custom"), "custom")):
-        if not os.path.isdir(directory):
-            continue
-        try:
-            entries = sorted(os.scandir(directory), key=lambda e: e.name.lower())
-        except OSError:
-            continue
-        for entry in entries:
-            if not entry.is_file(follow_symlinks=False):
-                continue
-            if not entry.name.endswith(".md") or entry.name == "AI-AGENT.md":
-                continue
-            meta = _parse_skill(entry.path)
-            if not meta:
-                continue
-            # The custom directory is scanned second and wins on name conflict.
-            by_name[meta["name"]] = meta
-            if len(by_name) >= SKILL_INDEX_MAX:
-                break
-    result = sorted(by_name.values(), key=lambda x: (x["source"] != "preset", x["name"].lower()))
-    # Keep the Connect attachment bounded even if descriptions are large.
-    while len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > SKILL_INDEX_MAX_BYTES and result:
-        result.pop()
-    return result
-
-
 def run_bundle(msg):
     rid = msg.get("id")
     if not _binding_ok(msg):
@@ -1173,10 +995,10 @@ def run_bundle(msg):
     for path in (os.path.join(os.path.expanduser("~/webai-claw-skills"), "AI-AGENT.md"),
                  os.path.join(BASE_DIR, "AI-AGENT.md"),
                  os.path.join(os.path.dirname(BASE_DIR), "AI-AGENT.md")):
-        guide = _read_text_file(path)
+        guide = read_text_file(path)
         if guide:
             break
-    handoff = _read_text_file(HANDOFF_PATH)
+    handoff = read_text_file(HANDOFF_PATH)
     return {
         "type": "bundle", "id": rid,
         "machine_id": MACHINE_ID,
@@ -1186,7 +1008,7 @@ def run_bundle(msg):
         "host_version": HOST_VERSION,
         "guide": guide,
         "handoff": handoff,
-        "skills": _skill_index(),
+        "skills": skill_index(),
     }
 
 

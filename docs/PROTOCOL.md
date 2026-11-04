@@ -4,6 +4,8 @@ The AI-visible protocol is a fenced `claw` block. The header is JSON on the
 first line, the action key is `claw`, the execution gate is the number `"v":3`,
 and every command names its target machine in `host`.
 
+The machine-readable schema is [`../protocol/v3.schema.json`](../protocol/v3.schema.json).
+
 ## 1. Page to extension: the command block
 
 ```claw
