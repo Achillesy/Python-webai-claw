@@ -427,7 +427,10 @@ Conflicts:
   tie-break.
 - `diag` also reports skipped or degraded skills in `skill_problems`,
   so a missing skill can be diagnosed from inside a chat without a
-  separate check run.
+  separate check run. A valid skill dropped by the index caps is not a
+  problem entry: check `diag`'s `skill_excluded` / `index_truncated`,
+  or run `skill_check.py --library`, which lists excluded skills with
+  their `count_limit` / `byte_limit` reason.
 
 Rollback: `write_file` backs up an overwritten file next to the target
 with a `.webai-claw.bak.<timestamp>` suffix. To restore one, copy the

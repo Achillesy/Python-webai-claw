@@ -174,15 +174,18 @@ def parse_skill(path, skills_dir=SKILLS_DIR):
     }
 
 
-def skill_index(skills_dir=SKILLS_DIR):
-    """Build the bounded, metadata-only skill index for a Connect bundle.
+def skill_index_detailed(skills_dir=SKILLS_DIR):
+    """Build the bounded skill index plus its truncation diagnostics.
 
-    Custom skills override presets by case-insensitive ``name``; the
-    winning entry records the shadowed preset in ``overrides``. Sorting
-    keeps presets first, then overriding customs (so a cap never drops a
-    custom skill that shadows a preset in favour of that preset), then
-    other customs by name. The hard entry cap is applied after sorting,
-    and the byte cap then trims from the end (lowest priority first).
+    Returns ``{"skills", "excluded_skills", "index_truncated",
+    "truncation_reason"}``. ``excluded_skills`` lists every otherwise
+    valid, parsed skill that did not make the index, in index-priority
+    order, each with ``name``, ``path`` and ``reason`` (``count_limit``
+    for the entry cap, ``byte_limit`` for the byte cap). A skill that is
+    valid but excluded is *not* an error, so it is not reported as a
+    validation problem; it is reported here so the user can see exactly
+    what the Connect bundle does not contain, instead of guessing from
+    a missing index entry.
     """
     by_key = {}
     preset_by_key = {}
@@ -215,15 +218,45 @@ def skill_index(skills_dir=SKILLS_DIR):
             x["name"].lower(),
         ),
     )
-    result = result[:SKILL_INDEX_MAX]
+    ordered = result
+    kept = ordered[:SKILL_INDEX_MAX]
+    count_excluded = ordered[SKILL_INDEX_MAX:]
     # Keep the Connect attachment bounded even if descriptions are large.
     while (
-        len(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+        len(json.dumps(kept, ensure_ascii=False).encode("utf-8"))
         > SKILL_INDEX_MAX_BYTES
-        and result
+        and kept
     ):
-        result.pop()
-    return result
+        kept.pop()
+    kept_paths = {entry["path"] for entry in kept}
+    count_excluded_paths = {entry["path"] for entry in count_excluded}
+    excluded = []
+    for entry in ordered:
+        if entry["path"] in kept_paths:
+            continue
+        reason = "count_limit" if entry["path"] in count_excluded_paths else "byte_limit"
+        excluded.append({
+            "name": entry["name"],
+            "path": entry["path"],
+            "reason": reason,
+        })
+    reasons = sorted({item["reason"] for item in excluded})
+    return {
+        "skills": kept,
+        "excluded_skills": excluded,
+        "index_truncated": bool(excluded),
+        "truncation_reason": ",".join(reasons) if reasons else None,
+    }
+
+
+def skill_index(skills_dir=SKILLS_DIR):
+    """Build the bounded, metadata-only skill index for a Connect bundle.
+
+    This is the ``skills`` part of :func:`skill_index_detailed`; use that
+    function when the caller also needs to know which valid skills were
+    excluded by the entry or byte cap.
+    """
+    return skill_index_detailed(skills_dir)["skills"]
 
 
 def validate_skill_file(path, skills_dir=SKILLS_DIR):
@@ -347,10 +380,16 @@ def validate_skill_file(path, skills_dir=SKILLS_DIR):
 
 
 def check_skill_library(skills_dir=SKILLS_DIR):
-    """Check a whole skill library. Returns ``{"skills", "problems"}``.
+    """Check a whole skill library.
 
-    ``skills`` is :func:`skill_index`; ``problems`` lists every file the
-    index skips or degrades, as ``{"severity", "path", "name", "problem"}``.
+    Returns ``{"skills", "problems", "excluded_skills", "index_truncated",
+    "truncation_reason"}``. ``skills`` is :func:`skill_index`;
+    ``problems`` lists every file the index skips or degrades, as
+    ``{"severity", "path", "name", "problem"}``. ``excluded_skills`` lists
+    every otherwise valid skill the index caps dropped (see
+    :func:`skill_index_detailed`); excluded skills are not problems, so
+    they do not change the error exit code, but they are reported here
+    so a library check never silently loses a skill.
     Routine custom-over-preset shadowing is reported in the index entry's
     ``overrides`` field, not duplicated here as a problem.
     """
@@ -395,4 +434,11 @@ def check_skill_library(skills_dir=SKILLS_DIR):
                         "name": report["name"],
                         "problem": problem,
                     })
-    return {"skills": skill_index(skills_dir), "problems": problems[:50]}
+    detailed = skill_index_detailed(skills_dir)
+    return {
+        "skills": detailed["skills"],
+        "problems": problems[:50],
+        "excluded_skills": detailed["excluded_skills"],
+        "index_truncated": detailed["index_truncated"],
+        "truncation_reason": detailed["truncation_reason"],
+    }

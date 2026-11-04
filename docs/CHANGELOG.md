@@ -17,6 +17,13 @@ All notable changes to webai-claw. Format follows
   AIs (`--check <file>`, `--library`, `--json`); exit 1 on any skill error.
 - `diag` now reports `skills` and `skill_problems` (additive fields an
   older extension ignores).
+- Skill index truncation diagnostics: `skill_index_detailed()` and
+  `check_skill_library()` now report `excluded_skills` (name, path,
+  `count_limit` / `byte_limit`), `index_truncated`, and
+  `truncation_reason`; `skill_check.py --library` prints the excluded
+  list, and `diag` reports `skill_excluded` / `index_truncated`.
+  Excluded skills are diagnostics, not errors, so the library check
+  exit code is unchanged.
 - Skill index entries for a custom skill that shadows a preset now record
   the shadowed preset in `overrides`; name conflicts are compared
   case-insensitively.
@@ -40,6 +47,11 @@ All notable changes to webai-claw. Format follows
 
 - A non-object native message no longer crashes the host loop; it gets an
   `error` reply and the host keeps listening.
+- A JSON `null` frame no longer terminates the host: end-of-input now
+  uses a dedicated EOF sentinel, so `null` gets an `error` reply like
+  other non-object messages and the host keeps listening; the main
+  loop iteration is factored into `_process_one_message()` so this
+  behaviour is covered by a framed stdin/stdout test.
 - The skill index cap is now enforced after sorting instead of
   mid-scan, so the entry cap and the byte cap are both honoured.
 

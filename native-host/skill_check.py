@@ -46,6 +46,12 @@ def _print_report(report, as_json):
                 print("- [%s] %s: %s" % (problem["severity"], problem["path"], problem["problem"]))
         else:
             print("problems: none")
+        if report.get("excluded_skills"):
+            print("excluded from index (%s):" % (report.get("truncation_reason") or "truncated"))
+            for skill in report["excluded_skills"]:
+                print("- %s (%s, %s)" % (skill["name"], skill["path"], skill["reason"]))
+        elif report.get("index_truncated"):
+            print("index truncated, but no excluded skills were recorded")
         return
     print("file: %s" % report["path"])
     if report["name"]:

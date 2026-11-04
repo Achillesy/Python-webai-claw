@@ -13,6 +13,7 @@ from hostlib.skills import (  # noqa: E402
     check_skill_library,
     parse_skill,
     skill_index,
+    skill_index_detailed,
     validate_skill_file,
 )
 
@@ -105,6 +106,48 @@ class SkillIndexTests(unittest.TestCase):
             self.assertTrue(any(p["severity"] == "error" for p in result["problems"]))
             self.assertFalse(any(p["path"].endswith("good.md") for p in result["problems"]))
 
+    def test_index_truncation_reports_excluded_skills_by_count(self):
+        # 55 short custom skills: the 50-entry cap drops the last 5 by
+        # name order, and the detailed index must name them (N1).
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = os.path.join(tmp, "custom")
+            for i in range(55):
+                write_skill(custom, "skill-%02d.md" % i,
+                            "name: skill-%02d\ndescription: S\nplatforms: any\n" % i)
+            detailed = skill_index_detailed(tmp)
+            # The entry cap drops skill-50..54; the byte cap may also
+            # drop one more entry, so assert the cap behaviour, not
+            # an exact kept count.
+            self.assertLessEqual(len(detailed["skills"]), 50)
+            self.assertTrue(detailed["index_truncated"])
+            self.assertIn("count_limit", detailed["truncation_reason"])
+            excluded = {s["name"]: s["reason"] for s in detailed["excluded_skills"]}
+            for i in range(50, 55):
+                self.assertEqual(excluded["skill-%02d" % i], "count_limit")
+            self.assertEqual(
+                len(detailed["skills"]) + len(detailed["excluded_skills"]), 55)
+            library = check_skill_library(tmp)
+            self.assertEqual(library["excluded_skills"], detailed["excluded_skills"])
+            self.assertEqual(library["problems"], [])
+
+    def test_index_truncation_reports_excluded_skills_by_bytes(self):
+        # Long descriptions push the 8KB byte cap below the entry cap:
+        # excluded skills must be reported with reason byte_limit.
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = os.path.join(tmp, "custom")
+            for i in range(40):
+                write_skill(custom, "big-%02d.md" % i,
+                            "name: big-%02d\ndescription: %s\nplatforms: any\n"
+                            % (i, "x" * 160))
+            detailed = skill_index_detailed(tmp)
+            self.assertLess(len(detailed["skills"]), 40)
+            self.assertTrue(detailed["index_truncated"])
+            self.assertEqual(detailed["truncation_reason"], "byte_limit")
+            self.assertTrue(detailed["excluded_skills"])
+            self.assertTrue(all(s["reason"] == "byte_limit" for s in detailed["excluded_skills"]))
+            self.assertEqual(
+                len(detailed["skills"]) + len(detailed["excluded_skills"]), 40)
+
     def test_parse_skill_truncates_and_strips_quotes(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = write_skill(tmp, "q.md",
@@ -130,6 +173,20 @@ class SkillCheckScriptTests(unittest.TestCase):
                                  capture_output=True, text=True, timeout=30)
             self.assertEqual(bad.returncode, 1)
             self.assertIn("problems:", bad.stdout)
+
+    def test_script_library_reports_truncation_without_error_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = os.path.join(tmp, "custom")
+            for i in range(55):
+                write_skill(custom, "skill-%02d.md" % i,
+                            "name: skill-%02d\ndescription: S\nplatforms: any\n" % i)
+            run = subprocess.run([sys.executable, SKILL_CHECK, "--library",
+                                  "--skills-dir", tmp],
+                                 capture_output=True, text=True, timeout=30)
+            # Excluded skills are diagnostics, not errors: exit stays 0.
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertIn("excluded from index", run.stdout)
+            self.assertIn("skill-54", run.stdout)
 
 
 if __name__ == "__main__":

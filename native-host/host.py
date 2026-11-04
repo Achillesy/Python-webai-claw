@@ -383,10 +383,22 @@ def get_machine_id():
     return str(mid)
 
 
+# Distinct from any JSON value, including JSON null (which decodes to
+# Python None). Returning None for EOF made a JSON null frame look like
+# end-of-input and killed the host; see the B1 fix in CHANGELOG.
+EOF_SENTINEL = object()
+
+
 def read_message():
+    """Read one native-messaging frame, or EOF_SENTINEL at end of input.
+
+    A JSON ``null`` frame decodes to Python ``None`` and is *not* EOF:
+    the caller must treat it as a malformed (non-object) message, return
+    an error, and keep listening.
+    """
     raw_len = sys.stdin.buffer.read(4)
     if not raw_len:
-        return None
+        return EOF_SENTINEL
     (length,) = struct.unpack("<I", raw_len)
     data = sys.stdin.buffer.read(length)
     return json.loads(data.decode("utf-8"))
@@ -723,11 +735,17 @@ def run_diag(msg):
                        for k, v in recent]
         # Additive diagnostics only: an older extension ignores unknown
         # fields. Skill problems explain a skill missing from the Connect
-        # index without a new protocol kind.
+        # index without a new protocol kind; excluded skills explain a
+        # valid skill dropped by the index caps.
         try:
-            skill_problems = check_skill_library().get("problems", [])
+            skill_report = check_skill_library()
+            skill_problems = skill_report.get("problems", [])
+            skill_excluded = skill_report.get("excluded_skills", [])
+            index_truncated = skill_report.get("index_truncated", False)
         except Exception:
             skill_problems = []
+            skill_excluded = []
+            index_truncated = False
         return {
             "type": "result",
             "id": msg.get("id"),
@@ -743,6 +761,8 @@ def run_diag(msg):
             "history_limit": HISTORY_LIMIT,
             "skills": skill_index(),
             "skill_problems": skill_problems,
+            "skill_excluded": skill_excluded,
+            "index_truncated": index_truncated,
             "recent": recent_list,
             "log_tail": "".join(tail),
             "ok": True,
@@ -981,6 +1001,47 @@ def heartbeat_loop():
             pass
 
 
+def _process_one_message():
+    """Read and handle one native-messaging frame.
+
+    Returns True to keep listening, False to stop (EOF, a framing error,
+    or a failed reply). This is the unit-testable form of the main loop:
+    JSON null reaches here as Python None, which is a non-object message
+    and gets an error reply, not an EOF exit.
+    """
+    try:
+        msg = read_message()
+    except Exception:
+        return False
+    if msg is EOF_SENTINEL:
+        return False
+    if not isinstance(msg, dict):
+        # A malformed frame that still parses as JSON (e.g. a list, or
+        # JSON null) must not take the host down; log it and keep listening.
+        log("handle error: non-object native message of type %s" % type(msg).__name__)
+        try:
+            send_message({"type": "error", "id": None, "error": "native message must be a JSON object"})
+        except Exception:
+            return False
+        return True
+    try:
+        res = handle(msg)
+        if res is None:
+            return True
+        if isinstance(res, list):
+            for item in res:
+                send_message(item)
+        else:
+            send_message(res)
+    except Exception as e:  # one bad message must not take the host down
+        log("handle error: %r" % (e,))
+        try:
+            send_message({"type": "error", "id": msg.get("id"), "error": str(e)})
+        except Exception:
+            return False
+    return True
+
+
 def main():
     global MACHINE_ID, BROWSER_ALIVE
     try:
@@ -1004,37 +1065,8 @@ def main():
     threading.Thread(target=heartbeat_loop, daemon=True).start()
     log("host started platform=%s hostname=%s machine_id=%s history=%d version=%s" % (
         sys.platform, socket.gethostname(), MACHINE_ID, len(history_store.HISTORY), HOST_VERSION))
-    while True:
-        try:
-            msg = read_message()
-        except Exception:
-            break
-        if msg is None:
-            break
-        if not isinstance(msg, dict):
-            # A malformed frame that still parses as JSON (e.g. a list)
-            # must not take the host down; log it and keep listening.
-            log("handle error: non-object native message of type %s" % type(msg).__name__)
-            try:
-                send_message({"type": "error", "id": None, "error": "native message must be a JSON object"})
-            except Exception:
-                break
-            continue
-        try:
-            res = handle(msg)
-            if res is None:
-                continue
-            if isinstance(res, list):
-                for item in res:
-                    send_message(item)
-            else:
-                send_message(res)
-        except Exception as e:  # one bad message must not take the host down
-            log("handle error: %r" % (e,))
-            try:
-                send_message({"type": "error", "id": msg.get("id"), "error": str(e)})
-            except Exception:
-                break
+    while _process_one_message():
+        pass
     BROWSER_ALIVE = False
     SHUTDOWN_EVENT.set()
     with STATE_LOCK:
