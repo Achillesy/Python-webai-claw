@@ -15,15 +15,10 @@
 # All paths below are relative to this file, so the host works wherever
 # it is installed from.
 
-import base64
-import hashlib
 import json
-import mimetypes
 import os
-import shutil
 import signal
 import socket
-import stat
 import struct
 import subprocess
 import sys
@@ -32,6 +27,9 @@ import time
 import uuid
 
 from hostlib.constants import *  # noqa: F401,F403
+from hostlib import files as file_ops
+from hostlib import history as history_store
+from hostlib.locks import acquire_lock, release_lock
 from hostlib.skills import (
     custom_skill_error,
     inside_dir,
@@ -51,164 +49,6 @@ def log(line):
                 f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + line + "\n")
     except OSError:
         pass
-
-
-def _session_key(session):
-    """One-way session fingerprint for persisted logs/history (never the URL)."""
-    s = str(session or "")
-    if not s:
-        return ""
-    return hashlib.sha256(s.encode("utf-8", "ignore")).hexdigest()[:16]
-
-
-def _byte_len(v):
-    try:
-        return len(str(v or "").encode("utf-8", "ignore"))
-    except Exception:
-        return 0
-
-
-def slim_entry(key, v):
-    """History is metadata only: no command text and no output text."""
-    v = v if isinstance(v, dict) else {}
-    return {
-        "id": v.get("id", key),
-        "ok": v.get("ok"),
-        "exit_code": v.get("exit_code"),
-        "duration_ms": v.get("duration_ms", 0),
-        "ts": v.get("ts", 0),
-        "session_key": v.get("session_key") or "",
-        "ai": v.get("ai", ""),
-        "cmd_len": int(v.get("cmd_len") or 0),
-        "stdout_len": int(v.get("stdout_len") or 0),
-        "stderr_len": int(v.get("stderr_len") or 0),
-    }
-
-
-def _history_key(v):
-    """Dedup key: session fingerprint + id (never the raw session URL)."""
-    v = v if isinstance(v, dict) else {}
-    return "%s|%s" % (v.get("session_key") or "", v.get("id") or "")
-
-
-def _iter_history(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(obj, dict) and obj.get("id"):
-                    yield obj
-    except OSError:
-        return
-
-
-def _trim_history(hist):
-    items = sorted(hist.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)
-    return dict(items[:HISTORY_LIMIT])
-
-
-def _acquire_lock(path, timeout=5.0, stale=HISTORY_LOCK_STALE):
-    """Best-effort cross-process lock. Returns an fd, or None on timeout."""
-    deadline = time.time() + timeout
-    while True:
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            try:
-                os.write(fd, str(os.getpid()).encode("ascii"))
-            except OSError:
-                pass
-            return fd
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(path) > stale:
-                    os.remove(path)
-                    continue
-            except OSError:
-                pass
-            if time.time() >= deadline:
-                return None
-            time.sleep(0.05)
-        except OSError:
-            return None
-
-
-def _release_lock(fd, path):
-    try:
-        os.close(fd)
-    except OSError:
-        pass
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-
-
-def load_history():
-    """Read the append-only JSONL history; last writer for (session,id) wins."""
-    hist = {}
-    for obj in _iter_history(HISTORY_PATH):
-        key = _history_key(obj)
-        hist[key] = slim_entry(str(obj.get("id") or ""), obj)
-    return _trim_history(hist)
-
-
-def refresh_history():
-    """Re-read from disk before dedup checks so two hosts see each other."""
-    global HISTORY
-    HISTORY = load_history()
-    return HISTORY
-
-
-def _compact_history_locked():
-    try:
-        if os.path.getsize(HISTORY_PATH) <= HISTORY_MAX_BYTES:
-            return
-    except OSError:
-        return
-    hist = {}
-    for obj in _iter_history(HISTORY_PATH):
-        key = _history_key(obj)
-        hist[key] = slim_entry(str(obj.get("id") or ""), obj)
-    hist = _trim_history(hist)
-    tmp = HISTORY_PATH + ".tmp.%d" % os.getpid()
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            for v in sorted(hist.values(), key=lambda x: x.get("ts", 0)):
-                f.write(json.dumps(v, ensure_ascii=False,
-                                   separators=(",", ":")) + "\n")
-        os.replace(tmp, HISTORY_PATH)
-    except OSError:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-
-
-def append_history(entry):
-    """Append one JSON line. The lock also protects occasional compaction."""
-    line = json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
-    lock_fd = _acquire_lock(HISTORY_LOCK, 5.0)
-    try:
-        with open(HISTORY_PATH, "a", encoding="utf-8") as f:
-            f.write(line)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError:
-                pass
-        if lock_fd is not None:
-            _compact_history_locked()
-    except OSError:
-        pass
-    finally:
-        if lock_fd is not None:
-            _release_lock(lock_fd, HISTORY_LOCK)
 
 
 def _pid_alive(pid):
@@ -373,7 +213,7 @@ def lease_acquire(binding_id, session, ai, page_url="", page_title="", browser="
             isinstance(ai, str) and ai):
         return {"ok": False, "reason": "invalid",
                 "error": "binding_id/session/ai must be non-empty strings"}
-    fd = _acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
+    fd = acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
     if fd is None:
         return {"ok": False, "reason": "lock_timeout",
                 "error": "could not acquire the machine lease lock"}
@@ -426,11 +266,11 @@ def lease_acquire(binding_id, session, ai, page_url="", page_title="", browser="
         _lease_write(new)
         return {"ok": True, "lease": new, "took_over_stale": stale}
     finally:
-        _release_lock(fd, LEASE_LOCK)
+        release_lock(fd, LEASE_LOCK)
 
 
 def lease_release(binding_id=None):
-    fd = _acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
+    fd = acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
     if fd is None:
         return False
     try:
@@ -445,13 +285,13 @@ def lease_release(binding_id=None):
             pass
         return True
     finally:
-        _release_lock(fd, LEASE_LOCK)
+        release_lock(fd, LEASE_LOCK)
 
 
 def lease_update_owned(binding_id, **fields):
     if not binding_id:
         return None
-    fd = _acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
+    fd = acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
     if fd is None:
         return None
     try:
@@ -466,7 +306,7 @@ def lease_update_owned(binding_id, **fields):
         _lease_write(lease)
         return lease
     finally:
-        _release_lock(fd, LEASE_LOCK)
+        release_lock(fd, LEASE_LOCK)
 
 
 def lease_touch(binding_id=None):
@@ -478,7 +318,7 @@ def lease_touch(binding_id=None):
 
 
 def lease_request_cancel(binding_id=None, foreign=False):
-    fd = _acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
+    fd = acquire_lock(LEASE_LOCK, 5.0, stale=LEASE_LOCK_STALE)
     if fd is None:
         return False
     try:
@@ -491,7 +331,7 @@ def lease_request_cancel(binding_id=None, foreign=False):
         _lease_write(lease)
         return True
     finally:
-        _release_lock(fd, LEASE_LOCK)
+        release_lock(fd, LEASE_LOCK)
 
 
 def lease_cancel_requested(binding_id=None):
@@ -587,13 +427,13 @@ def run_exec(msg, cancel_event=None):
     binding_id = msg.get("binding_id") or ""
     # Two host processes (Chrome/Edge) share the home dir: re-read before
     # dedup so a just-finished command in the other browser is visible.
-    refresh_history()
+    history_store.refresh_history()
     session = msg.get("session") or ""
-    hkey = _history_key({"id": rid, "session_key": _session_key(session)})
-    if hkey in HISTORY:
+    hkey = history_store.history_key({"id": rid, "session_key": history_store.session_key(session)})
+    if hkey in history_store.HISTORY:
         log("duplicate id=%s session_key=%s, returning cached" %
-            (rid, _session_key(session)))
-        h = HISTORY[hkey]
+            (rid, history_store.session_key(session)))
+        h = history_store.HISTORY[hkey]
         # dedup hit: honestly report "this is cached"; output is summary only (full output was filled back into the page at the time)
         return {
             "type": "result",
@@ -719,8 +559,8 @@ def run_exec(msg, cancel_event=None):
     stderr = decode_output(box.get("err"))
     duration_ms = int((time.time() - started) * 1000)
     log("exec id=%s session_key=%s exit=%s ms=%s cmd_len=%d" % (
-        msg.get("id"), _session_key(session) or "-", exit_code, duration_ms,
-        _byte_len(cmd)))
+        msg.get("id"), history_store.session_key(session) or "-", exit_code, duration_ms,
+        history_store.byte_len(cmd)))
     res = {
         "type": "result",
         "id": msg.get("id"),
@@ -741,19 +581,19 @@ def run_exec(msg, cancel_event=None):
     res["approved"] = approved
     res["ts"] = int(time.time())
     # History entry: metadata and lengths only.
-    HISTORY[hkey] = {
+    history_store.HISTORY[hkey] = {
         "id": rid,
         "ok": res["ok"],
         "exit_code": exit_code,
         "duration_ms": duration_ms,
         "ts": res["ts"],
-        "session_key": _session_key(session),
+        "session_key": history_store.session_key(session),
         "ai": msg.get("ai") or "",
-        "cmd_len": _byte_len(cmd),
-        "stdout_len": _byte_len(stdout),
-        "stderr_len": _byte_len(stderr),
+        "cmd_len": history_store.byte_len(cmd),
+        "stdout_len": history_store.byte_len(stdout),
+        "stderr_len": history_store.byte_len(stderr),
     }
-    append_history(HISTORY[hkey])
+    history_store.append_history(history_store.HISTORY[hkey])
     lease_update_owned(binding_id, state="connected", child_pid=None,
                        child_pgid=None, task_id=None, cmd="", started_at=0,
                        last_progress=time.time(), cancel_requested=False)
@@ -761,205 +601,15 @@ def run_exec(msg, cancel_event=None):
 
 
 def run_write_file(msg):
-    """Atomically replace or create one file after validating the request."""
-    rid = msg.get("id")
-    if not _binding_ok(msg):
-        return {"type": "error", "id": rid, "error": "not the bound page"}
-    if not _target_ok(msg):
-        return {"type": "error", "id": rid, "error": "missing or mismatched host"}
-    path = msg.get("path")
-    content = msg.get("content")
-    if not isinstance(path, str) or not path:
-        return {"type": "error", "id": rid, "error": "missing path"}
-    if not isinstance(content, str):
-        return {"type": "error", "id": rid, "error": "missing content"}
-    session = msg.get("session") or ""
-    refresh_history()
-    hkey = _history_key({"id": rid, "session_key": _session_key(session)})
-    if hkey in HISTORY:
-        h = HISTORY[hkey]
-        return {
-            "type": "result", "id": rid,
-            "hostname": socket.gethostname(), "machine_id": MACHINE_ID,
-            "session": session, "ai": msg.get("ai") or h.get("ai", ""),
-            "ok": h.get("ok"), "exit_code": h.get("exit_code"),
-            "stdout": "…(dedup hit: this write id was already executed; no second write)",
-            "stderr": "", "duration_ms": h.get("duration_ms", 0),
-            "duplicate": True, "ts": h.get("ts", 0),
-        }
-    started = time.time()
-    mode = msg.get("mode") or "replace"
-    if mode != "replace":
-        return {"type": "error", "id": rid, "error": "unsupported write mode: %s" % mode}
-    encoding = msg.get("encoding") or "utf8"
-    if encoding not in ("utf8", "base64"):
-        return {"type": "error", "id": rid, "error": "unsupported encoding: %s" % encoding}
-    try:
-        data = (content.encode("utf-8") if encoding == "utf8"
-                else base64.b64decode(content, validate=True))
-    except Exception as e:
-        return {"type": "error", "id": rid, "error": "content decode failed: %r" % (e,)}
-    if len(data) > MAX_WRITE_BYTES:
-        return {"type": "error", "id": rid,
-                "error": "write payload too large: %d bytes (cap %d); "
-                         "do not append in chunks; create a small local "
-                         "generator/transformer script with write_file and run "
-                         "it with exec, or use a dedicated editor" %
-                         (len(data), MAX_WRITE_BYTES)}
-    target = os.path.abspath(os.path.expanduser(path))
-    low = target.lower()
-    for pat in FILE_DENY:
-        if pat in low:
-            log("write_file DENY id=%s path_len=%d pattern=%s" % (rid, len(target), pat))
-            return {"type": "error", "id": rid, "error": "refusing to write sensitive path"}
-    if os.path.islink(target):
-        return {"type": "error", "id": rid, "error": "refusing to write through a symlink"}
-    if os.path.exists(target) and not os.path.isfile(target):
-        return {"type": "error", "id": rid, "error": "target is not a regular file"}
-    parent = os.path.dirname(target)
-    if not os.path.isdir(parent):
-        return {"type": "error", "id": rid, "error": "parent directory does not exist"}
-    if is_preset_skill_path(target):
-        return {"type": "error", "id": rid,
-                "error": "preset skills are installer-managed; copy the skill into custom/"}
-    if (inside_dir(target, CUSTOM_SKILLS_DIR) and target.endswith(".md") and
-            os.path.basename(target) != "README.md"):
-        skill_error = custom_skill_error(data)
-        if skill_error:
-            return {"type": "error", "id": rid, "error": skill_error}
-    exists = os.path.exists(target)
-    if exists and msg.get("overwrite") is not True:
-        return {"type": "error", "id": rid,
-                "error": "target exists; read it first, then resend with "
-                         "overwrite=true and the old expected_sha256"}
-    old = b""
-    old_sha = None
-    if exists:
-        try:
-            with open(target, "rb") as f:
-                old = f.read()
-            old_sha = hashlib.sha256(old).hexdigest()
-        except OSError as e:
-            return {"type": "error", "id": rid, "error": "read existing file failed: %r" % (e,)}
-        expected = (msg.get("expected_sha256") or "").strip().lower()
-        if not expected:
-            return {"type": "error", "id": rid,
-                    "error": "overwrite requires expected_sha256; read the file "
-                             "first and resend with its current SHA-256"}
-        if expected != old_sha:
-            return {"type": "error", "id": rid,
-                    "error": "expected_sha256 mismatch; file changed, re-read and retry"}
-    new_sha = hashlib.sha256(data).hexdigest()
-    backup_path = None
-    if exists and msg.get("backup") is not False:
-        backup_path = target + ".webai-claw.bak." + time.strftime("%Y%m%d-%H%M%S")
-        n = 1
-        while os.path.exists(backup_path):
-            backup_path = target + ".webai-claw.bak." + time.strftime("%Y%m%d-%H%M%S") + "." + str(n)
-            n += 1
-        try:
-            shutil.copy2(target, backup_path)
-        except OSError as e:
-            return {"type": "error", "id": rid, "error": "backup failed: %r" % (e,)}
-    tmp = target + ".webai-claw.tmp.%d.%s" % (os.getpid(), uuid.uuid4().hex)
-    try:
-        with open(tmp, "wb") as f:
-            f.write(data)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError:
-                pass
-        if exists:
-            try:
-                os.chmod(tmp, stat.S_IMODE(os.stat(target).st_mode))
-            except OSError:
-                pass
-        os.replace(tmp, target)
-    except OSError as e:
-        try:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        except OSError:
-            pass
-        return {"type": "error", "id": rid, "error": "write failed: %r" % (e,)}
-    old_size = len(old) if exists else 0
-    summary = ("wrote %s\nold_size: %d bytes\nnew_size: %d bytes\nsha256: %s\nbackup: %s" %
-               (target, old_size, len(data), new_sha, backup_path or "none"))
-    result = {
-        "type": "result", "id": rid,
-        "hostname": socket.gethostname(), "machine_id": MACHINE_ID,
-        "session": msg.get("session") or "", "ai": msg.get("ai") or "",
-        "ok": True, "exit_code": 0, "stdout": summary, "stderr": "",
-        "duration_ms": int((time.time() - started) * 1000),
-        "path": target, "size": len(data), "old_size": old_size,
-        "sha256": new_sha, "old_sha256": old_sha,
-        "backup": backup_path, "changed": old_sha != new_sha,
-    }
-    session_key = _session_key(msg.get("session") or "")
-    append_history({
-        "id": rid, "ok": True, "exit_code": 0,
-        "duration_ms": result["duration_ms"], "ts": int(time.time()),
-        "session_key": session_key, "ai": msg.get("ai") or "",
-        "cmd_len": 0, "stdout_len": len(summary), "stderr_len": 0,
-    })
-    log("write_file id=%s path_len=%d size=%d backup=%s" %
-        (rid, len(target), len(data), bool(backup_path)))
-    return result
+    return file_ops.run_write_file(
+        msg, _binding_ok, _target_ok, log, MACHINE_ID
+    )
 
 
 def run_read_file(msg):
-    """Read a local file, return it base64-encoded in chunks. Deny-list + size cap."""
-    rid = msg.get("id")
-    if not _binding_ok(msg):
-        return {"type": "error", "id": rid, "error": "not the bound page"}
-    if not _target_ok(msg):
-        return {"type": "error", "id": rid, "error": "missing or mismatched host"}
-    path = msg.get("path", "")
-    if not path:
-        return {"type": "error", "id": rid, "error": "missing path"}
-    try:
-        real = os.path.realpath(os.path.expanduser(path))
-    except Exception as e:
-        return {"type": "error", "id": rid, "error": "path resolution failed: %r" % (e,)}
-    if not os.path.isfile(real):
-        return {"type": "error", "id": rid, "error": "file not found: %s" % real}
-    low = real.lower()
-    for pat in FILE_DENY:
-        if pat in low:
-            log("read_file DENY id=%s path_len=%d pattern=%s" % (rid, len(real), pat))
-            return {"type": "error", "id": rid, "error": "refusing to read sensitive path"}
-    try:
-        size = os.path.getsize(real)
-    except OSError as e:
-        return {"type": "error", "id": rid, "error": "cannot read size: %r" % (e,)}
-    if size > MAX_FILE_SIZE:
-        return {"type": "error", "id": rid,
-                "error": "file too large: %d bytes (cap %d)" % (size, MAX_FILE_SIZE)}
-    try:
-        with open(real, "rb") as f:
-            raw = f.read()
-    except OSError as e:
-        return {"type": "error", "id": rid, "error": "read failed: %r" % (e,)}
-    b64 = base64.b64encode(raw).decode("ascii")
-    name = os.path.basename(real)
-    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-    chunks = [b64[i:i + CHUNK_B64] for i in range(0, len(b64), CHUNK_B64)] or [""]
-    total = len(chunks)
-    out = []
-    for i, ch in enumerate(chunks):
-        out.append({
-            "type": "file_chunk",
-            "id": rid,
-            "name": name,
-            "mime": mime,
-            "size": size,
-            "index": i,
-            "total": total,
-            "data": ch,
-        })
-    log("read_file id=%s path_len=%d size=%d chunks=%d mime=%s" % (rid, len(real), size, total, mime))
-    return out
+    return file_ops.run_read_file(
+        msg, _binding_ok, _target_ok, log, MACHINE_ID
+    )
 
 
 def _binding_ok(msg):
@@ -1061,12 +711,12 @@ def run_diag(msg):
     if not _target_ok(msg):
         return {"type": "error", "id": msg.get("id"), "error": "missing or mismatched host"}
     try:
-        refresh_history()
+        history_store.refresh_history()
         tail = []
         if os.path.exists(LOG_PATH):
             with open(LOG_PATH, encoding="utf-8", errors="replace") as f:
                 tail = f.readlines()[-20:]
-        recent = sorted(HISTORY.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)[:10]
+        recent = sorted(history_store.HISTORY.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)[:10]
         recent_list = [{"id": v.get("id", k), "ok": v.get("ok"),
                         "ts": v.get("ts"), "session_key": v.get("session_key", "")}
                        for k, v in recent]
@@ -1081,7 +731,7 @@ def run_diag(msg):
             "host_version": HOST_VERSION,
             "lease": lease_status(),
             "pid": os.getpid(),
-            "history_size": len(HISTORY),
+            "history_size": len(history_store.HISTORY),
             "history_limit": HISTORY_LIMIT,
             "recent": recent_list,
             "log_tail": "".join(tail),
@@ -1151,7 +801,7 @@ def handle_connect(msg):
     if result.get("ok"):
         LEASE_BINDING = binding
         log("connect binding=%s session_key=%s ai=%s%s%s" % (
-            binding, _session_key(msg.get("session") or "") or "-",
+            binding, history_store.session_key(msg.get("session") or "") or "-",
             msg.get("ai") or "",
             " refreshed" if result.get("refreshed") else "",
             " took_over_stale" if result.get("took_over_stale") else ""))
@@ -1170,7 +820,7 @@ def handle_connect(msg):
         }
     owner = result.get("owner") or {}
     log("connect busy binding=%s session_key=%s owner_binding=%s state=%s" % (
-        binding, _session_key(msg.get("session") or "") or "-",
+        binding, history_store.session_key(msg.get("session") or "") or "-",
         owner.get("binding_id") or "", result.get("state") or ""))
     return {"type": "busy", "id": msg.get("id"), **result}
 
@@ -1291,7 +941,6 @@ ACTIVE = None
 BROWSER_ALIVE = True
 SHUTDOWN_EVENT = threading.Event()
 LEASE_BINDING = None
-HISTORY = {}
 MACHINE_ID = None
 
 
@@ -1319,7 +968,7 @@ def heartbeat_loop():
 
 
 def main():
-    global HISTORY, MACHINE_ID, BROWSER_ALIVE
+    global MACHINE_ID, BROWSER_ALIVE
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
         os.makedirs(RUNTIME_DIR, exist_ok=True)
@@ -1330,7 +979,7 @@ def main():
         log("fatal: machine identity missing/invalid at %s; run install.py" % MACHINE_ID_PATH)
         sys.stderr.write("webai-claw: machine identity missing; run native-host/install.py\n")
         return 3
-    HISTORY = load_history()
+    history_store.refresh_history()
     BROWSER_ALIVE = True
     for sig in (signal.SIGTERM, signal.SIGINT, getattr(signal, "SIGHUP", None)):
         if sig is not None:
@@ -1340,7 +989,7 @@ def main():
                 pass
     threading.Thread(target=heartbeat_loop, daemon=True).start()
     log("host started platform=%s hostname=%s machine_id=%s history=%d version=%s" % (
-        sys.platform, socket.gethostname(), MACHINE_ID, len(HISTORY), HOST_VERSION))
+        sys.platform, socket.gethostname(), MACHINE_ID, len(history_store.HISTORY), HOST_VERSION))
     while True:
         try:
             msg = read_message()

@@ -19,11 +19,8 @@
 
 var STABLE_MS = 1000;
 var VERSION = (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : "?";
-var MAX_RESULT = 6000;
 var MAX_CMD_BYTES = 512 * 1024;
 var MAX_WRITE_BYTES = 512 * 1024; // write_file payload cap; host enforces the same raw-byte limit
-var KEEP_HEAD = 2000;
-var KEEP_TAIL = 3500;
 var STORE_KEY = 'mh_processed_ids_v2';  // session-scoped keys: <session>|<id>
 var AUTO_KEY = 'mh_auto_send';
 var ATTACH_AUTO_KEY = 'mh_auto_send_attachments';
@@ -82,10 +79,7 @@ var selfActing = false;
 // BINDING_ID identifies this page instance, not its URL. The native host
 // stores it in the machine lease; other tabs/browsers (even with the same
 // URL) cannot take over while this page owns the lease.
-var BINDING_ID = (function () {
-  try { return 'p-' + crypto.randomUUID(); }
-  catch (e) { return 'p-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
-})();
+var BINDING_ID = WebAIClawSession.makeBindingId();
 var bound = false;
 var boundSession = null;
 var boundAi = null;
@@ -111,57 +105,30 @@ function notifyConnectDone(ok, error) {
   } catch (e) {}
 }
 
+var UUID_RE = WebAIClawProtocol.UUID_RE;
+
 function normalizeSession(v) {
-  try {
-    var u = new URL(v, location.href);
-    return u.origin + u.pathname.replace(/\/+$/, '');
-  } catch (e) {
-    return String(v || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
-  }
+  return WebAIClawSession.normalizeSession(v, location.href);
 }
 
 function sessionKeyOf() {
-  try {
-    if (adapter && typeof adapter.sessionKey === 'function') {
-      return normalizeSession(adapter.sessionKey());
-    }
-  } catch (e) {}
-  return normalizeSession(location.origin + location.pathname);
+  return WebAIClawSession.sessionKeyOf(adapter, location);
 }
 
 function aiType() {
-  return (adapter && (adapter.ai || adapter.name)) || 'unknown';
+  return WebAIClawSession.aiType(adapter);
 }
 
 function sameOrigin(a, b) {
-  try { return new URL(a).origin === new URL(b).origin; }
-  catch (e) { return false; }
+  return WebAIClawSession.sameOrigin(a, b);
 }
 
 function isProvisionalSession(s) {
-  try {
-    var u = new URL(s);
-    var p = u.pathname.replace(/\/+$/, '');
-    if (u.hostname === 'muse.ai') {
-      return p === '' || p === '/thread/new' || p === '/new';
-    }
-    if (u.hostname === 'chat.deepseek.com') {
-      // A real DeepSeek chat is /a/chat/s/<uuid>. The new-chat page is the
-      // bare origin or /a/chat (no session id yet); adopt the first real id.
-      var m = /^(\/a)?\/chat\/s\/([^/]+)$/.exec(p);
-      return !m || m[2] === 'new';
-    }
-  } catch (e) {}
-  return false;
+  return WebAIClawSession.isProvisionalSession(s);
 }
 
-var UUID_RE = WebAIClawProtocol.UUID_RE;
 function targetGate(block) {
-  if (!localMachineId) return 'defer';
-  var got = String(block.host || '').trim().toLowerCase();
-  if (!UUID_RE.test(got)) return 'missing';  // missing, hostname, *, or placeholder
-  if (got !== String(localMachineId).trim().toLowerCase()) return 'ignore';
-  return 'pass';
+  return WebAIClawSession.targetGate(block, localMachineId, UUID_RE);
 }
 
 var missingHostWarned = {};
@@ -656,14 +623,6 @@ function writeFileBlock(block) {
   }
 }
 
-// ---------- result formatting ----------
-function clip(s) {
-  if (s == null) return '';
-  s = String(s);
-  if (s.length <= MAX_RESULT) return s;
-  return s.slice(0, KEEP_HEAD) + '\n\n…(omitted)…\n\n' + s.slice(s.length - KEEP_TAIL);
-}
-
 // ---------- attach: fetch file from host, hand to adapter for upload ----------
 function b64ToBytes(b64) {
   var bin = atob(b64);
@@ -990,71 +949,11 @@ function probeBlock(block) {
 
 
 function formatDiag(res) {
-  var lines = [];
-  lines.push('[claw:diag] id=' + res.id + ' host=' + (res.hostname || '?') +
-             ' platform=' + (res.platform || '?') + ' pid=' + (res.pid || '?'));
-  if (res.machine_id) lines.push('machine: ' + res.machine_id);
-  if (res.session) lines.push('session: ' + res.session + '  ai: ' + (res.ai || '?'));
-  if (res.lease) {
-    lines.push('lease: state=' + (res.lease.state || '?') +
-               ' binding=' + ((res.lease.owner || {}).binding_id || '-') +
-               ' task=' + (res.lease.task_id || '-'));
-  }
-  lines.push('history: ' + res.history_size + '/' + res.history_limit);
-  if (res.recent && res.recent.length) {
-    lines.push('recent:');
-    res.recent.forEach(function (r) {
-      var t = r.ts ? new Date(r.ts * 1000).toTimeString().slice(0, 8) : '--:--:--';
-      lines.push('  ' + (r.id || '?') + '  ' + (r.ok ? 'ok' : 'fail') + '  ' + t);
-    });
-  }
-  if (res.log_tail) {
-    lines.push('log_tail:');
-    lines.push(res.log_tail.replace(/\s+$/, ''));
-  }
-  return lines.join('\n');
+  return WebAIClawFormat.formatDiag(res);
 }
 
-
 function formatResult(res) {
-  if (res.history_size !== undefined && res.log_tail !== undefined) {
-    return formatDiag(res);
-  }
-  if (res.kind === 'summary') {
-    var summaryLines = ['[claw:summary] id=' + res.id +
-      ' ok=' + (res.ok ? 'true' : 'false')];
-    if (res.handoff) summaryLines.push('handoff: ' + res.handoff);
-    summaryLines.push('Next: open a new chat and click Connect; the attachment will include handoff.md.');
-    return summaryLines.join('\n');
-  }
-  var secs = ((res.duration_ms || 0) / 1000).toFixed(1);
-  var lines = [];
-  var head = '[claw:result] id=' + res.id + ' ok=' + (res.ok ? 'true' : 'false') +
-             ' exit=' + res.exit_code + ' duration=' + secs + 's';
-  if (res.machine_id) head += ' machine=' + res.machine_id;
-  if (res.session) head += ' session=' + res.session;
-  if (res.ai) head += ' ai=' + res.ai;
-  if (res.platform) head += ' platform=' + res.platform;
-  if (res.hostname) head += ' host=' + res.hostname;
-  if (res.timeout) head += ' timeout=' + res.timeout;
-  if (res.approved) head += ' approved=true';
-  if (res.killed) head += ' killed=true';
-  lines.push(head);
-  var cmd = cmdById[res.id];
-  if (cmd) {
-    var first = cmd.split('\n')[0];
-    var n = cmd.split('\n').length;
-    var extra = n > 1 ? ' (' + n + ' lines total)' : '';
-    lines.push('cmd: ' + (first.length > 120 ? first.slice(0, 120) + '…' : first) + extra);
-  }
-  if (res.error) lines.push('error: ' + res.error);
-  if (res.stdout) lines.push(res.stdout.replace(/\s+$/, ''));
-  if (res.stderr) {
-    lines.push('');
-    lines.push('stderr:');
-    lines.push(clip(res.stderr.replace(/\s+$/, '')));
-  }
-  return lines.join('\n');
+  return WebAIClawFormat.formatResult(res, cmdById);
 }
 
 // ---------- fill-back (handed to adapter) ----------

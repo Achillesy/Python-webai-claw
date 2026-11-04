@@ -21,6 +21,8 @@ AI chat page
     ▼
 extension/                      Chrome MV3
   ├─ protocol.js                shared v3 block parser and kind list
+  ├─ session.js                 session normalization and target gate
+  ├─ format.js                  plain-text result formatting
   ├─ adapters/<site>.js         DeepSeek and Muse adapters
   ├─ content.js                 block pickup, binding, dedup, fill-back
   ├─ background.js              service worker: lease control, queue, router
@@ -31,6 +33,9 @@ extension/                      Chrome MV3
     ▼
 native-host/host.py             Python standard library only; entry point
   ├─ hostlib/constants.py       paths, limits, and deny lists
+  ├─ hostlib/locks.py           cross-process lock helpers
+  ├─ hostlib/history.py         metadata-only history and dedup
+  ├─ hostlib/files.py           read_file and write_file operations
   ├─ hostlib/skills.py          skill parsing, validation, and index
   ├─ command executor           shell subprocess, timeout, process-tree kill
   ├─ machine identity           ~/.webai-claw/machine.json (install time)

@@ -7,7 +7,7 @@ from a git checkout and from ~/.webai-claw.
 import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HOST_VERSION = "1.2.4"
+HOST_VERSION = "1.2.5"
 
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")

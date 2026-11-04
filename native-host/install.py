@@ -41,7 +41,8 @@ INSTALL_DIR = os.path.expanduser("~/.webai-claw")
 DOC_DIR = os.path.expanduser("~/webai-claw-skills")
 HOST_FILES = [
     "host.py", "host.sh", "host.bat",
-    "hostlib/__init__.py", "hostlib/constants.py", "hostlib/skills.py",
+    "hostlib/__init__.py", "hostlib/constants.py", "hostlib/locks.py",
+    "hostlib/history.py", "hostlib/files.py", "hostlib/skills.py",
     "skill/mcp_exec.py",
 ]  # Blender MCP socket client
 # AI operator guides live at the repo root, not under native-host/.

@@ -21,9 +21,9 @@ class WriteFileTests(unittest.TestCase):
         host._binding_ok = lambda msg: True
         host._target_ok = lambda msg: True
         host.MACHINE_ID = "test-machine"
-        host.HISTORY = {}
-        host.refresh_history = lambda: None
-        host.append_history = lambda entry: None
+        host.history_store.HISTORY = {}
+        host.history_store.refresh_history = lambda: None
+        host.history_store.append_history = lambda entry: None
         host.log = lambda line: None
         self.root = tempfile.mkdtemp(prefix="webai-claw-write-")
         self.path = os.path.join(self.root, "note.txt")

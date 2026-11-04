@@ -3,6 +3,18 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.5] - 2026-11-04
+
+### Changed
+
+- Moved cross-process locks, metadata-only history/dedup, and file read/write
+  operations into `native-host/hostlib/`.
+- Moved session normalization/target gating and result formatting into
+  `extension/session.js` and `extension/format.js`.
+- Added module-specific Node regression tests for session and formatting.
+- Updated the installer and architecture documentation for the new modules.
+- Extension and host bumped to 1.2.5.
+
 ## [1.2.4] - 2026-11-04
 
 ### Changed
