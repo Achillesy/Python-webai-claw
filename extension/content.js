@@ -36,6 +36,18 @@ if (!adapter) {
   console.log('[webai-claw] no adapter for this site: ' + location.hostname + '; content script disabled');
   return;
 }
+// An adapter with a missing required method would otherwise fail silently
+// later (scan() returns early, attach fails at upload time). Fail here,
+// once, naming exactly what is missing.
+var adapterCheck = WebAIClawAdapterCheck.validate(adapter);
+if (!adapterCheck.ok) {
+  console.log('[webai-claw] adapter for ' + location.hostname + ' is incomplete, missing: ' +
+    adapterCheck.missing.join(', ') + '; content script disabled');
+  return;
+}
+adapterCheck.warnings.forEach(function (w) {
+  console.log('[webai-claw] adapter warning for ' + location.hostname + ': ' + w);
+});
 console.log('[webai-claw] adapter selected: ' + adapter.name + ' (' + location.hostname + ')');
 
 function elementText(el) {
@@ -124,7 +136,7 @@ function sameOrigin(a, b) {
 }
 
 function isProvisionalSession(s) {
-  return WebAIClawSession.isProvisionalSession(s);
+  return WebAIClawSession.isProvisionalSession(s, adapter);
 }
 
 function targetGate(block) {

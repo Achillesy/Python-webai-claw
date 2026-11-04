@@ -398,6 +398,44 @@ Rules:
 - Keep the skill under 8 KB; the host rejects custom skills over 32 KB.
 - The next Connect rebuilds the skill index automatically.
 
+### 2.6.2 Validating, resolving conflicts, and rolling back a skill
+
+A skill that does not appear in the next Connect index is not a mystery
+to debug by re-adding it. Check it first, on the host, without executing
+its content:
+
+```sh
+python3 ~/.webai-claw/skill_check.py --check ~/webai-claw-skills/custom/my-workflow.md
+python3 ~/.webai-claw/skill_check.py --library
+```
+
+The check reports, per file: errors that keep it out of the index
+(missing `name`/`description`, non-UTF-8 text, over 32 KB, a platform
+list with no recognised value, a symlink) and warnings that degrade it
+(bad `version` format, unknown platform values, a name outside
+`[A-Za-z0-9_-]`, missing `triggers`, over 8 KB). Fix the errors, then
+reconnect; warnings alone do not block the skill.
+
+Conflicts:
+
+- A custom skill with the same `name` as a preset (compared
+  case-insensitively) overrides that preset, and the index entry records
+  the shadowed preset in `overrides`. That is the intended way to replace
+  a preset's behaviour without editing the preset file.
+- Two files with the same `name` in one directory keep only one index
+  entry (later filename wins). Rename one of them; do not rely on the
+  tie-break.
+- `diag` also reports skipped or degraded skills in `skill_problems`,
+  so a missing skill can be diagnosed from inside a chat without a
+  separate check run.
+
+Rollback: `write_file` backs up an overwritten file next to the target
+with a `.webai-claw.bak.<timestamp>` suffix. To restore one, copy the
+backup over the skill with `exec` (for example
+`cp ~/webai-claw-skills/custom/my-workflow.md.webai-claw.bak.<timestamp> ~/webai-claw-skills/custom/my-workflow.md`),
+run `skill_check.py --check` on the restored file, and reconnect. The
+backup is a plain file copy; it does not need `write_file` or a hash.
+
 ## 3. Platform and shell
 
 The Connect attachment states:

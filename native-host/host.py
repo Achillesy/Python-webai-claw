@@ -31,6 +31,7 @@ from hostlib import files as file_ops
 from hostlib import history as history_store
 from hostlib.locks import acquire_lock, release_lock
 from hostlib.skills import (
+    check_skill_library,
     custom_skill_error,
     inside_dir,
     is_preset_skill_path,
@@ -720,6 +721,13 @@ def run_diag(msg):
         recent_list = [{"id": v.get("id", k), "ok": v.get("ok"),
                         "ts": v.get("ts"), "session_key": v.get("session_key", "")}
                        for k, v in recent]
+        # Additive diagnostics only: an older extension ignores unknown
+        # fields. Skill problems explain a skill missing from the Connect
+        # index without a new protocol kind.
+        try:
+            skill_problems = check_skill_library().get("problems", [])
+        except Exception:
+            skill_problems = []
         return {
             "type": "result",
             "id": msg.get("id"),
@@ -733,6 +741,8 @@ def run_diag(msg):
             "pid": os.getpid(),
             "history_size": len(history_store.HISTORY),
             "history_limit": HISTORY_LIMIT,
+            "skills": skill_index(),
+            "skill_problems": skill_problems,
             "recent": recent_list,
             "log_tail": "".join(tail),
             "ok": True,
@@ -898,6 +908,10 @@ def handle_cancel(msg):
 
 
 def handle(msg):
+    # A non-object native message cannot carry an id or a type; reject it
+    # without crashing the host loop (the main loop also guards this).
+    if not isinstance(msg, dict):
+        return {"type": "error", "id": None, "error": "native message must be a JSON object"}
     t = msg.get("type")
     if t == "ping":
         return {
@@ -997,6 +1011,15 @@ def main():
             break
         if msg is None:
             break
+        if not isinstance(msg, dict):
+            # A malformed frame that still parses as JSON (e.g. a list)
+            # must not take the host down; log it and keep listening.
+            log("handle error: non-object native message of type %s" % type(msg).__name__)
+            try:
+                send_message({"type": "error", "id": None, "error": "native message must be a JSON object"})
+            except Exception:
+                break
+            continue
         try:
             res = handle(msg)
             if res is None:

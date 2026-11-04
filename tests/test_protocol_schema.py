@@ -124,6 +124,18 @@ class ProtocolSchemaTests(unittest.TestCase):
         for sample in samples:
             self.assertTrue(validate(self.schema, sample), sample)
 
+    def test_unknown_fields_are_tolerated_but_unknown_kinds_are_not(self):
+        # Forward compatibility: a newer writer may add a header field an
+        # older reader does not know. That must not invalidate the block.
+        host = "12345678-1234-1234-1234-123456789abc"
+        self.assertTrue(validate(self.schema, {
+            "claw": "exec", "id": "e9", "host": host, "v": 3,
+            "cmd": "pwd", "future_field": 123,
+        }))
+        self.assertFalse(validate(self.schema, {
+            "claw": "future_kind", "id": "e10", "host": host, "v": 3, "cmd": "pwd",
+        }))
+
     def test_invalid_blocks_are_rejected(self):
         host = "12345678-1234-1234-1234-123456789abc"
         invalid = [

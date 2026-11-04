@@ -34,7 +34,15 @@
     catch (e) { return false; }
   }
 
-  function isProvisionalSession(value) {
+  function isProvisionalSession(value, adapter) {
+    // A new site declares its own provisional pattern on its adapter, so
+    // adding a site never needs a change to this shared module. Adapters
+    // without the hook fall back to the built-in muse/deepseek rules.
+    try {
+      if (adapter && typeof adapter.isProvisionalSession === 'function') {
+        return !!adapter.isProvisionalSession(value);
+      }
+    } catch (e) {}
     try {
       var u = new URL(value);
       var p = u.pathname.replace(/\/+$/, '');

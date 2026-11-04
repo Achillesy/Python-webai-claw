@@ -18,4 +18,13 @@ if (!empty || empty.content !== '') throw new Error('empty content must be valid
 if (parse('{"claw":"exec","id":"e1","host":"h","cmd":"pwd","v":2}') !== null) {
   throw new Error('v2 must be rejected');
 }
+// Forward compatibility: unknown header fields are ignored, not fatal.
+// An older parser must still read a block a newer writer produced.
+const future = parse('{"claw":"exec","id":"e9","host":"12345678-1234-1234-1234-123456789abc","cmd":"pwd","v":3,"future_field":123}');
+if (!future || future.kind !== 'exec' || future.cmd !== 'pwd') {
+  throw new Error('unknown header fields must be ignored: ' + JSON.stringify(future));
+}
+if (parse('{"claw":"future_kind","id":"e10","host":"h","cmd":"pwd","v":3}') !== null) {
+  throw new Error('unknown kinds must be rejected');
+}
 console.log('protocol parser OK');

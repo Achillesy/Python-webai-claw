@@ -2,10 +2,25 @@
 
 These functions are pure/local-file helpers. They do not execute skill content
 and do not know about the native-messaging protocol.
+
+Discovery rules (see docs/ROADMAP-1.2.md and AI-AGENT.md section 2.6):
+
+- Root ``*.md`` files are installer-managed presets; ``custom/*.md`` files
+  are user-managed. A custom skill wins over a preset with the same ``name``,
+  compared case-insensitively, and the winning index entry records the
+  preset it shadows in ``overrides`` so the AI can see the conflict.
+- ``AI-AGENT.md`` is the runtime guide, never a skill.
+- Invalid files are skipped by the index, never fatal to other skills. Use
+  :func:`validate_skill_file` / :func:`check_skill_library` (or the
+  ``skill_check.py`` wrapper) to see *why* a skill is missing instead of
+  guessing from a missing index entry.
+- ``version`` is advisory metadata, not a compatibility gate: an
+  unrecognised version is a warning, never a reason to drop a skill.
 """
 
 import json
 import os
+import re
 import sys
 
 from .constants import (
@@ -16,6 +31,11 @@ from .constants import (
     SKILL_INDEX_MAX_BYTES,
     SKILLS_DIR,
 )
+
+RECOMMENDED_SKILL_BYTES = 8 * 1024
+RECOGNIZED_PLATFORMS = ("macos", "windows", "linux", "any")
+_VERSION_RE = re.compile(r"^\d+(\.\d+){0,2}$")
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 
 
 def inside_dir(path, directory):
@@ -77,19 +97,36 @@ def skill_platform():
     return "linux"
 
 
-def parse_skill(path):
-    """Read only the frontmatter and return bounded metadata."""
+def _split_list(value):
+    """Split a frontmatter list value, tolerating ``[a, b]`` and quotes."""
+    items = []
+    for item in (value or "").strip().strip("[]").split(","):
+        item = item.strip().strip('"').strip("'")
+        if item and item not in items:
+            items.append(item)
+    return items
+
+
+def _read_frontmatter(path):
+    """Return (meta, closed) for a skill file, or (None, False) if unreadable.
+
+    ``meta`` holds raw ``name``/``description``/``triggers``/``platforms``/
+    ``version`` strings. An unclosed frontmatter block is tolerated by the
+    index (as before) but reported as a warning by the validator.
+    """
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             first = f.readline()
             if first.strip() != "---":
-                return None
+                return None, False
             meta = {}
+            closed = False
             for _ in range(160):
                 line = f.readline()
                 if not line:
                     break
                 if line.strip() == "---":
+                    closed = True
                     break
                 if ":" not in line:
                     continue
@@ -99,44 +136,58 @@ def parse_skill(path):
                 if key in ("name", "description", "triggers", "platforms", "version"):
                     meta[key] = value
     except OSError:
+        return None, False
+    return meta, closed
+
+
+def parse_skill(path, skills_dir=SKILLS_DIR):
+    """Read only the frontmatter and return bounded metadata, or None.
+
+    Returns None for files that must not appear in the index: no
+    frontmatter, no name/description, or a platform list that does not
+    cover this machine. Everything else is kept, with truncation applied
+    the same way the Connect attachment bounds it.
+    """
+    meta, _closed = _read_frontmatter(path)
+    if meta is None:
         return None
     name = (meta.get("name") or "").strip()
     desc = (meta.get("description") or "").strip()
     if not name or not desc:
         return None
-    triggers = []
-    for item in (meta.get("triggers") or "").strip("[]").split(","):
-        item = item.strip()
-        if item and item not in triggers:
-            triggers.append(item)
-    platforms = []
-    for item in (meta.get("platforms") or "any").strip("[]").split(","):
-        item = item.strip().lower()
-        if item and item not in platforms:
-            platforms.append(item)
+    triggers = _split_list(meta.get("triggers") or "")[:8]
+    platforms = [item.lower() for item in _split_list(meta.get("platforms") or "any")][:4]
     if not platforms:
         platforms = ["any"]
     current = skill_platform()
     if "any" not in platforms and current not in platforms:
         return None
-    rel = os.path.relpath(path, SKILLS_DIR).replace(os.sep, "/")
+    rel = os.path.relpath(path, skills_dir).replace(os.sep, "/")
     return {
         "name": name[:80],
         "description": desc[:SKILL_DESC_MAX],
-        "triggers": triggers[:8],
-        "platforms": platforms[:4],
+        "triggers": triggers,
+        "platforms": platforms,
         "version": (meta.get("version") or "1")[:16],
         "path": "~/webai-claw-skills/" + rel,
         "source": "custom" if rel.startswith("custom/") else "preset",
     }
 
 
-def skill_index():
-    by_name = {}
-    for directory, source in (
-        (SKILLS_DIR, "preset"),
-        (os.path.join(SKILLS_DIR, "custom"), "custom"),
-    ):
+def skill_index(skills_dir=SKILLS_DIR):
+    """Build the bounded, metadata-only skill index for a Connect bundle.
+
+    Custom skills override presets by case-insensitive ``name``; the
+    winning entry records the shadowed preset in ``overrides``. Sorting
+    keeps presets first, then overriding customs (so a cap never drops a
+    custom skill that shadows a preset in favour of that preset), then
+    other customs by name. The hard entry cap is applied after sorting,
+    and the byte cap then trims from the end (lowest priority first).
+    """
+    by_key = {}
+    preset_by_key = {}
+    custom_dir = os.path.join(skills_dir, "custom")
+    for directory, source in ((skills_dir, "preset"), (custom_dir, "custom")):
         if not os.path.isdir(directory):
             continue
         try:
@@ -148,16 +199,23 @@ def skill_index():
                 continue
             if not entry.name.endswith(".md") or entry.name == "AI-AGENT.md":
                 continue
-            meta = parse_skill(entry.path)
+            meta = parse_skill(entry.path, skills_dir)
             if not meta:
                 continue
-            # The custom directory is scanned second and wins on name conflict.
-            by_name[meta["name"]] = meta
-            if len(by_name) >= SKILL_INDEX_MAX:
-                break
+            key = meta["name"].lower()
+            if source == "preset":
+                preset_by_key[key] = meta
+            elif key in preset_by_key:
+                meta["overrides"] = preset_by_key[key]["path"]
+            by_key[key] = meta
     result = sorted(
-        by_name.values(), key=lambda x: (x["source"] != "preset", x["name"].lower())
+        by_key.values(),
+        key=lambda x: (
+            0 if x["source"] == "preset" else 1 if "overrides" in x else 2,
+            x["name"].lower(),
+        ),
     )
+    result = result[:SKILL_INDEX_MAX]
     # Keep the Connect attachment bounded even if descriptions are large.
     while (
         len(json.dumps(result, ensure_ascii=False).encode("utf-8"))
@@ -166,3 +224,175 @@ def skill_index():
     ):
         result.pop()
     return result
+
+
+def validate_skill_file(path, skills_dir=SKILLS_DIR):
+    """Validate one skill file without executing it.
+
+    Returns ``{"path", "name", "errors", "warnings", "meta"}``. Errors are
+    the reasons a file would not appear in the index (or would be
+    rejected by ``write_file`` for custom skills); warnings are things
+    that degrade discovery or future compatibility but do not drop the
+    skill. ``meta`` is the :func:`parse_skill` result, or None.
+    """
+    errors = []
+    warnings = []
+    name = None
+    try:
+        if os.path.islink(path):
+            errors.append("skill must be a regular file, not a symlink (symlinks are skipped by the index)")
+    except OSError:
+        pass
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return {"path": path, "name": None, "errors": ["skill file cannot be read"], "warnings": [], "meta": None}
+    if size > MAX_SKILL_BYTES:
+        errors.append("skill too large: %d bytes (cap %d)" % (size, MAX_SKILL_BYTES))
+    elif size > RECOMMENDED_SKILL_BYTES:
+        warnings.append(
+            "skill is %d bytes, over the recommended %d bytes; the index stays "
+            "metadata-only but a full read may clip" % (size, RECOMMENDED_SKILL_BYTES)
+        )
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError):
+        errors.append("skill must be UTF-8 text")
+        return {"path": path, "name": None, "errors": errors, "warnings": warnings, "meta": None}
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        errors.append("skill needs frontmatter starting with --- with name and description")
+        return {"path": path, "name": None, "errors": errors, "warnings": warnings, "meta": None}
+    meta, closed = _read_frontmatter(path)
+    if meta is None:
+        errors.append("skill frontmatter cannot be read")
+        return {"path": path, "name": None, "errors": errors, "warnings": warnings, "meta": None}
+    if not closed:
+        warnings.append("frontmatter is not closed with ---; add the closing marker")
+    name = (meta.get("name") or "").strip()
+    desc = (meta.get("description") or "").strip()
+    if not name:
+        errors.append("frontmatter needs a non-empty name")
+    if not desc:
+        errors.append("frontmatter needs a non-empty description")
+    if name:
+        if len(name) > 80:
+            warnings.append("name is over 80 characters; the index truncates it, which can collide with a similar name")
+        if not _NAME_RE.match(name):
+            warnings.append(
+                "name %r uses characters outside [A-Za-z0-9_-]; keep skill names "
+                "to letters, digits, _ and - so the index key is unambiguous" % name
+            )
+    if len(desc) > SKILL_DESC_MAX:
+        warnings.append("description is over %d characters; the index truncates it" % SKILL_DESC_MAX)
+    version = (meta.get("version") or "").strip()
+    if not version:
+        warnings.append("version is missing; treated as 1")
+    elif not _VERSION_RE.match(version):
+        warnings.append("version %r is not numeric (expected e.g. 1 or 1.2); treated as advisory only" % version)
+    if not (meta.get("triggers") or "").strip():
+        warnings.append("triggers are missing; matching relies on name and description only")
+    platforms_raw = _split_list(meta.get("platforms") or "")
+    if meta.get("platforms") and platforms_raw:
+        unknown = [p for p in platforms_raw if p.lower() not in RECOGNIZED_PLATFORMS]
+        if unknown:
+            if all(p.lower() not in RECOGNIZED_PLATFORMS for p in platforms_raw):
+                errors.append(
+                    "platforms %r contain no recognised value (macos, windows, linux, any); "
+                    "the skill will not appear in any index" % platforms_raw
+                )
+            else:
+                warnings.append("unknown platform values ignored by the index: %r" % unknown)
+    # Conflict / duplicate visibility, resolved against the library on disk.
+    # Cross-source shadowing (custom over preset) is the intended override
+    # mechanism, so it is a plain warning here and is recorded in the
+    # index entry's ``overrides`` field, not repeated as a library
+    # problem. A same-source duplicate is a real ambiguity: the index
+    # keeps only one entry and the loser is invisible.
+    if name:
+        key = name.lower()
+        own_source = "custom" if inside_dir(path, os.path.join(skills_dir, "custom")) else "preset"
+        for directory, source in ((skills_dir, "preset"), (os.path.join(skills_dir, "custom"), "custom")):
+            if not os.path.isdir(directory):
+                continue
+            try:
+                entries = sorted(os.scandir(directory), key=lambda e: e.name.lower())
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.path == os.path.abspath(path) or not entry.name.endswith(".md"):
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                other, _ = _read_frontmatter(entry.path)
+                if other and (other.get("name") or "").strip().lower() == key:
+                    other_source = "custom" if directory.endswith("custom") else "preset"
+                    rel = os.path.relpath(entry.path, skills_dir).replace(os.sep, "/")
+                    if other_source != own_source:
+                        warnings.append(
+                            "name %r shadows %s skill ~/webai-claw-skills/%s "
+                            "(intended override; the index entry records it in overrides)"
+                            % (name, other_source, rel)
+                        )
+                    else:
+                        warnings.append(
+                            "duplicate name %r also used by %s skill "
+                            "~/webai-claw-skills/%s; the index keeps only one entry "
+                            "(later filename wins within one directory)"
+                            % (name, other_source, rel)
+                        )
+    meta_result = parse_skill(path, skills_dir)
+    return {"path": path, "name": name, "errors": errors, "warnings": warnings, "meta": meta_result}
+
+
+def check_skill_library(skills_dir=SKILLS_DIR):
+    """Check a whole skill library. Returns ``{"skills", "problems"}``.
+
+    ``skills`` is :func:`skill_index`; ``problems`` lists every file the
+    index skips or degrades, as ``{"severity", "path", "name", "problem"}``.
+    Routine custom-over-preset shadowing is reported in the index entry's
+    ``overrides`` field, not duplicated here as a problem.
+    """
+    problems = []
+    custom_dir = os.path.join(skills_dir, "custom")
+    for directory in (skills_dir, custom_dir):
+        if not os.path.isdir(directory):
+            continue
+        try:
+            entries = sorted(os.scandir(directory), key=lambda e: e.name.lower())
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.name.endswith(".md") or entry.name == "AI-AGENT.md":
+                continue
+            if not entry.is_file(follow_symlinks=False):
+                problems.append({
+                    "severity": "error",
+                    "path": entry.path,
+                    "name": None,
+                    "problem": "not a regular file (symlinks are skipped by the index)",
+                })
+                continue
+            report = validate_skill_file(entry.path, skills_dir)
+            for problem in report["errors"]:
+                problems.append({
+                    "severity": "error",
+                    "path": entry.path,
+                    "name": report["name"],
+                    "problem": problem,
+                })
+            for problem in report["warnings"]:
+                # Surface only warnings that change discovery; routine
+                # advice (triggers, version, size) and intended
+                # custom-over-preset shadowing stay in the per-file
+                # report (shadowing is also in the index overrides
+                # field) so the library check stays actionable.
+                if problem.startswith(("platforms", "unknown platform", "duplicate name")):
+                    problems.append({
+                        "severity": "warning",
+                        "path": entry.path,
+                        "name": report["name"],
+                        "problem": problem,
+                    })
+    return {"skills": skill_index(skills_dir), "problems": problems[:50]}

@@ -173,7 +173,35 @@ Routing uses the originating page port and `binding_id`. The content script
 re-checks that the page session and AI type still match before filling. Results
 are never guessed into another tab.
 
-## 5. Timeouts, auto-send, and pacing
+## 5. Compatibility between extension and host versions
+
+The extension and the host upgrade independently (the extension through
+the store, the host through re-running the installer), so a mixed pair
+must keep working. These are the rules that make that safe:
+
+- Unknown header fields in a `claw` block are ignored, not rejected. A
+  newer writer may add a field an older parser does not know; the block
+  still executes with the fields the parser does know. Unknown `claw`
+  kinds are rejected, not ignored, because executing an unknown kind
+  would be a guess.
+- Unknown native-message fields are ignored by both sides. An older
+  extension ignores newer `diag` fields such as `skills` and
+  `skill_problems`; an older host simply never sends them.
+- An unknown native-message `type` gets an `error` reply, never a crash.
+  A non-object native message gets an `error` reply as well; the host
+  keeps listening.
+- `host_version` in `pong`, `connected`, and `bundle` is informational
+  and is used for one thing only: Muse guide caching (the guide is
+  resent when the host version changes). It is not a compatibility gate,
+  and no version combination is hard-rejected.
+- The one hard boundary is the execution gate itself: `v` must be the
+  number `3` exactly, and `host` must match the install-time machine
+  UUID. Those two rules do not change across versions.
+- Skill and adapter changes follow the same rule: a new skill needs no
+  extension change (it appears in the next Connect index); a new site
+  adapter is an extension change and needs a store submission.
+
+## 6. Timeouts, auto-send, and pacing
 
 - Default timeout: 120 seconds.
 - Autonomous maximum: 1200 seconds.

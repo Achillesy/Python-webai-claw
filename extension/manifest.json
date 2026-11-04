@@ -17,6 +17,7 @@
         "protocol.js",
         "session.js",
         "format.js",
+        "adapter-check.js",
         "adapters/muse.js",
         "adapters/deepseek.js",
         "content.js"

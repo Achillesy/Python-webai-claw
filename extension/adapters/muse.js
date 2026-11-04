@@ -48,6 +48,20 @@
       return location.origin;
     },
 
+    // A provisional session has no real thread id yet: the bare origin,
+    // /thread/new, or /new. The core adopts the first real session for
+    // the same binding instead of disconnecting.
+    isProvisionalSession: function (value) {
+      try {
+        var u = new URL(value);
+        if (u.hostname !== 'muse.ai') return false;
+        var p = u.pathname.replace(/\/+$/, '');
+        return p === '' || p === '/thread/new' || p === '/new';
+      } catch (e) {
+        return false;
+      }
+    },
+
 
     // Muse attachment limits (verified 2026-10-02):
     // - input[type=file] has no accept attribute; no known type restrictions;

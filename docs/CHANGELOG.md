@@ -3,6 +3,54 @@
 All notable changes to webai-claw. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+
+- `extension/adapter-check.js`: validates a site adapter's required
+  methods at load time; an incomplete adapter disables the content script
+  with a named error instead of failing silently later.
+- Adapter `isProvisionalSession(url)` hook (implemented for Muse and
+  DeepSeek): a new site declares its own new-chat URL pattern, so session
+  adoption no longer depends on hardcoded site rules in `session.js`.
+- `native-host/skill_check.py`: read-only skill validator for users and
+  AIs (`--check <file>`, `--library`, `--json`); exit 1 on any skill error.
+- `diag` now reports `skills` and `skill_problems` (additive fields an
+  older extension ignores).
+- Skill index entries for a custom skill that shadows a preset now record
+  the shadowed preset in `overrides`; name conflicts are compared
+  case-insensitively.
+- `python3 native-host/install.py --verify`: read-only completeness check
+  for the installed host, manifests, machine identity, and skill
+  directories.
+- `docs/ADAPTER-TEMPLATE.md`: skeleton adapter for a new site.
+
+### Changed
+
+- `docs/ARCHITECTURE.md` §4 now states the exact three-part manifest
+  checklist for a new site, and that the core does not change for one.
+- `docs/PROTOCOL.md` now documents extension/host version compatibility:
+  unknown fields are ignored, unknown kinds and non-object messages are
+  errors, not crashes.
+- `tests/test_install.py` fails if any module under `hostlib/` or `skill/`
+  is missing from the installer's file list, and if the installer's and
+  uninstaller's guide lists diverge.
+
+### Fixed
+
+- A non-object native message no longer crashes the host loop; it gets an
+  `error` reply and the host keeps listening.
+- The skill index cap is now enforced after sorting instead of
+  mid-scan, so the entry cap and the byte cap are both honoured.
+
+### Notes
+
+- Version deliberately unchanged (extension and host stay 1.2.5) on this
+  branch. Host-only changes take effect when the user re-runs the
+  installer; the extension changes (`adapter-check.js`, manifest load
+  order, provisional-session hook) need a store submission before store
+  users get them.
+
 ## [1.2.5] - 2026-11-04
 
 ### Changed

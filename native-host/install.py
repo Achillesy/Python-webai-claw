@@ -40,11 +40,14 @@ except NameError:
 INSTALL_DIR = os.path.expanduser("~/.webai-claw")
 DOC_DIR = os.path.expanduser("~/webai-claw-skills")
 HOST_FILES = [
-    "host.py", "host.sh", "host.bat",
+    "host.py", "host.sh", "host.bat", "skill_check.py",
     "hostlib/__init__.py", "hostlib/constants.py", "hostlib/locks.py",
     "hostlib/history.py", "hostlib/files.py", "hostlib/skills.py",
     "skill/mcp_exec.py",
-]  # Blender MCP socket client
+]  # Blender MCP socket client; keep this list complete: tests/test_install.py
+# fails if any .py file under hostlib/ or skill/ is missing from it, because
+# an installed host that imports a module the installer never copied will
+# not start at all.
 # AI operator guides live at the repo root, not under native-host/.
 DOC_FILES = ["AI-AGENT.md", "AI-BLENDER.md", "AI-MACOS.md", "AI-WIN.md"]
 # Where to fetch the host program when install.py is downloaded standalone
@@ -295,7 +298,89 @@ def print_macos_permission_notes():
     )
 
 
+def verify_install(install_dir=INSTALL_DIR, doc_dir=DOC_DIR, repo_root=None):
+    """Read-only completeness check for an installed host.
+
+    Returns (ok, lines). It never installs, downloads, or rotates the
+    machine identity, so a user (with a web AI) can run it after an
+    upgrade to find a half-copied host before trying to Connect. The
+    repo-copy comparison only runs when repo_root points at a checkout
+    that actually contains the host files; a standalone install is
+    checked for presence, identity, manifests, and skill directories.
+    """
+    lines = []
+    ok = True
+
+    def check(condition, message):
+        nonlocal ok
+        lines.append(("PASS" if condition else "FAIL") + ": " + message)
+        if not condition:
+            ok = False
+
+    for name in HOST_FILES:
+        check(os.path.isfile(os.path.join(install_dir, name)),
+              "installed host file present: %s" % name)
+        if repo_root:
+            src = os.path.join(repo_root, "native-host", name)
+            dst = os.path.join(install_dir, name)
+            if os.path.isfile(src) and os.path.isfile(dst):
+                try:
+                    with open(src, "rb") as f:
+                        expected = f.read()
+                    with open(dst, "rb") as f:
+                        actual = f.read()
+                    check(expected == actual, "installed host file matches repo: %s" % name)
+                except OSError as e:
+                    check(False, "installed host file readable: %s (%s)" % (name, e))
+    mid_path = os.path.join(install_dir, "machine.json")
+    mid = None
+    try:
+        with open(mid_path, "r", encoding="utf-8") as f:
+            mid = json.load(f).get("machine_id")
+        uuid.UUID(str(mid))
+        check(True, "machine.json holds a valid UUID")
+    except Exception:
+        check(False, "machine.json holds a valid UUID")
+    check(os.path.isdir(doc_dir), "skill library directory present: %s" % doc_dir)
+    check(os.path.isdir(os.path.join(doc_dir, "custom")),
+          "custom skill directory present")
+    launcher = os.path.join(install_dir, "host.bat" if sys.platform == "win32" else "host.sh")
+    expected_origins = ["chrome-extension://%s/" % eid for eid in EXTENSION_IDS]
+    if sys.platform == "darwin":
+        for target_dir in (
+            os.path.expanduser("~/Library/Application Support/Google/Chrome/NativeMessagingHosts"),
+            os.path.expanduser("~/Library/Application Support/Microsoft Edge/NativeMessagingHosts"),
+        ):
+            manifest_path = os.path.join(target_dir, HOST_NAME + ".json")
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+                check(manifest.get("path") == launcher,
+                      "manifest points at installed launcher: %s" % manifest_path)
+                check(manifest.get("allowed_origins") == expected_origins,
+                      "manifest allowlists the store/dev extension IDs: %s" % manifest_path)
+            except (OSError, ValueError):
+                check(False, "host manifest present and readable: %s" % manifest_path)
+    elif sys.platform == "win32":
+        lines.append("INFO: Windows registry manifests are not checked by --verify; "
+                     "re-run install.py if Connect reports the host as missing")
+    else:
+        lines.append("INFO: native-messaging manifest check skipped on this platform")
+    return ok, lines
+
+
 def main():
+    if "--verify" in sys.argv:
+        repo_root = os.path.dirname(HERE) if HERE else None
+        if repo_root and not all(
+            os.path.exists(os.path.join(repo_root, "native-host", n)) for n in HOST_FILES
+        ):
+            repo_root = None
+        ok, lines = verify_install(repo_root=repo_root)
+        for line in lines:
+            print(line)
+        print("verify: %s" % ("OK" if ok else "FAILED"))
+        return 0 if ok else 1
     install_files()
     print("Installed host program to %s" % INSTALL_DIR)
 

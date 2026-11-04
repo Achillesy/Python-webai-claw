@@ -15,6 +15,10 @@ if (s.normalizeSession('https://muse.ai/thread/a/?x=1') !== 'https://muse.ai/thr
 if (!s.isProvisionalSession('https://muse.ai/thread/new')) throw new Error('muse provisional');
 if (!s.isProvisionalSession('https://chat.deepseek.com/a/chat')) throw new Error('deepseek provisional');
 if (s.isProvisionalSession('https://chat.deepseek.com/a/chat/s/1234')) throw new Error('real session');
+// Adapter-declared provisional rules take precedence over the fallback.
+const fakeAdapter = { isProvisionalSession: (v) => v === 'https://example.test/new' };
+if (!s.isProvisionalSession('https://example.test/new', fakeAdapter)) throw new Error('adapter provisional rule');
+if (s.isProvisionalSession('https://muse.ai/thread/new', fakeAdapter)) throw new Error('adapter rule must not fall back to muse');
 const uuid = '12345678-1234-1234-1234-123456789abc';
 if (s.targetGate({ host: uuid }, uuid, /^[0-9a-f-]{36}$/i) !== 'pass') throw new Error('target pass');
 if (s.targetGate({ host: uuid }, '00000000-0000-0000-0000-000000000000', /^[0-9a-f-]{36}$/i) !== 'ignore') throw new Error('target ignore');

@@ -23,6 +23,7 @@ extension/                      Chrome MV3
   ├─ protocol.js                shared v3 block parser and kind list
   ├─ session.js                 session normalization and target gate
   ├─ format.js                  plain-text result formatting
+  ├─ adapter-check.js           adapter interface validation (required methods)
   ├─ adapters/<site>.js         DeepSeek and Muse adapters
   ├─ content.js                 block pickup, binding, dedup, fill-back
   ├─ background.js              service worker: lease control, queue, router
@@ -36,7 +37,8 @@ native-host/host.py             Python standard library only; entry point
   ├─ hostlib/locks.py           cross-process lock helpers
   ├─ hostlib/history.py         metadata-only history and dedup
   ├─ hostlib/files.py           read_file and write_file operations
-  ├─ hostlib/skills.py          skill parsing, validation, and index
+  ├─ hostlib/skills.py          skill parsing, validation, index, and library check
+  ├─ skill_check.py             read-only skill validator for users and AIs
   ├─ command executor           shell subprocess, timeout, process-tree kill
   ├─ machine identity           ~/.webai-claw/machine.json (install time)
   ├─ machine lease              ~/.webai-claw/runtime/active.json
@@ -67,21 +69,52 @@ native-host/uninstall.py        symmetric removal
 
 ## 4. Adapter interface
 
-One adapter file per supported site:
+One adapter file per supported site. The core (`content.js`) never changes
+for a new site; it only calls the interface below, and
+`extension/adapter-check.js` validates it at load time. An adapter missing
+a required method disables the content script with one console error naming
+the missing methods, instead of failing silently later (for example, a
+missing `findBlocks` that makes `scan()` return early, or a missing
+`uploadFile` that makes `attach` fail at upload time).
+
+Required:
 
 - `findBlocks()`: locate block-level code elements. Never scan inline `<code>`.
 - `sessionKey()`: normalized conversation URL (origin + pathname).
-- `ai`: `deepseek` or `muse`.
+- `ai`: `deepseek` or `muse` (or the new site's AI type).
 - `fillResult(text)`: write text into the chat input.
 - `clickSend()`: click the site send button.
-- `isStopButton(el)`: optional; detect the site stop/interrupt button.
-- `isGenerating()`: optional; wait while the AI is still producing output.
 - `uploadFile({name, mime, bytes})`: inject a chat attachment.
-- `isUploading()`: optional; wait while an upload is in progress.
 
-Adding a site requires one adapter file, one `manifest.json` content-script
-entry, and a host permission for that site. Supported sites in this release:
-`chat.deepseek.com` and `muse.ai`.
+Optional:
+
+- `isStopButton(el)`: detect the site stop/interrupt button.
+- `isGenerating()`: wait while the AI is still producing output.
+- `isUploading()`: wait while an upload is in progress.
+- `isInputEmpty()`: report whether the composer is empty (used to verify
+  the Connect handshake was actually sent; without it the core assumes the
+  composer was cleared).
+- `isProvisionalSession(url)`: report whether a session URL has no real
+  conversation id yet (for example a new-chat URL). Without it, session
+  adoption falls back to the built-in Muse/DeepSeek rules in `session.js`,
+  which a new site must not rely on.
+
+Adding a site requires exactly these edits, all in the extension, and no
+core change:
+
+1. One new file `extension/adapters/<site>.js` implementing the interface
+   above (see `docs/ADAPTER-TEMPLATE.md`; verify its selectors live with a
+   `probe` block before writing them).
+2. One line in `extension/manifest.json` `content_scripts[].js` (load order:
+   `protocol.js`, `session.js`, `format.js`, `adapter-check.js`, adapters,
+   `content.js`).
+3. One entry in `manifest.json` `content_scripts[].matches` and the same
+   entry in `host_permissions`.
+
+Supported sites in this release: `chat.deepseek.com` and `muse.ai`. A new
+site is therefore an extension change and needs a store submission; a new
+host skill or host helper is not, and takes effect when the user re-runs
+the installer.
 
 ## 5. Identity and binding
 
@@ -100,7 +133,12 @@ entry, and a host permission for that site. Supported sites in this release:
   the guide on every Connect.
 - The host builds a metadata-only skill index from `~/webai-claw-skills/*.md`
   and `~/webai-claw-skills/custom/*.md`; the extension includes it in the
-  Connect attachment or note.
+  Connect attachment or note. A custom skill overrides a preset with the
+  same `name` (compared case-insensitively) and the winning entry records
+  the shadowed preset in `overrides`. Invalid skills are skipped, never
+  fatal to the index; `diag` reports them in `skill_problems`, and
+  `native-host/skill_check.py --library` explains each one without
+  executing skill content.
 - Only the bound page may execute. Other tabs or browsers on the same machine
   receive `busy` and are told which page owns the lease.
 - A stale lease (dead host, missing browser, heartbeat older than 30 seconds)

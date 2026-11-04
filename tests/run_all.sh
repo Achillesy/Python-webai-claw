@@ -7,6 +7,7 @@ python3 -m unittest discover -s tests -v
 node tests/test_protocol_parser.js
 node tests/test_session.js
 node tests/test_format.js
+node tests/test_adapters.js
 node tests/test_background_split.js
 
 python3 -m py_compile \
@@ -16,6 +17,7 @@ python3 -m py_compile \
   native-host/hostlib/history.py \
   native-host/hostlib/files.py \
   native-host/hostlib/skills.py \
+  native-host/skill_check.py \
   native-host/install.py \
   native-host/uninstall.py
 
@@ -23,6 +25,7 @@ for f in \
   extension/protocol.js \
   extension/session.js \
   extension/format.js \
+  extension/adapter-check.js \
   extension/background.js \
   extension/background-ui.js \
   extension/content.js \

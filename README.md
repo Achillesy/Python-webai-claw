@@ -71,7 +71,13 @@ and guides.
 `custom/`. The host generates a metadata-only skill index at Connect time, and
 the AI reads the matching skill with `exec` only when needed. The AI can save a
 confirmed workflow as a custom skill with `write_file`; no extension change or
-manual upload is required.
+manual upload is required. A custom skill with the same `name` as a preset
+overrides it (the index entry records the shadowed preset in `overrides`).
+Validate a skill before relying on it with
+`python3 ~/.webai-claw/skill_check.py --check <file>` (or `--library` for
+the whole library); after any host upgrade, `python3 native-host/install.py
+--verify` checks the installed host, manifests, machine identity, and skill
+directories without changing anything.
 
 ### 2. Install the extension
 

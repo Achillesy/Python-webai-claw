@@ -55,6 +55,21 @@
       return location.origin + p;
     },
 
+    // A provisional session has no real chat id yet: the bare origin or
+    // /a/chat, or a /chat/s/new placeholder. The core adopts the first
+    // real session for the same binding instead of disconnecting.
+    isProvisionalSession: function (value) {
+      try {
+        var u = new URL(value);
+        if (u.hostname !== 'chat.deepseek.com') return false;
+        var p = u.pathname.replace(/\/+$/, '');
+        var m = /^(\/a)?\/chat\/s\/([^/]+)$/.exec(p);
+        return !m || m[2] === 'new';
+      } catch (e) {
+        return false;
+      }
+    },
+
 
     // DeepSeek attachment limits (verified 2026-10-02, enforced by the web frontend):
     // - No archives: zip / rar / 7z / tar / gz / bz2 / xz / tgz etc. —
