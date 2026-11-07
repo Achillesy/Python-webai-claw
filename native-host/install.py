@@ -200,6 +200,17 @@ def fetch_files():
     else:
         print("WARNING: host build stamp not found in checkout; "
               "run python3 scripts/sync_host_build.py first")
+    # Residue from the pre-f3b162f standalone installer, which nested the
+    # stamp at INSTALL_DIR/extension/host-build.json: nothing reads it
+    # there, but a stale copy next to the real one is a trap for the next
+    # person who goes looking. Remove it when present.
+    stale_nested = os.path.join(INSTALL_DIR, "extension", "host-build.json")
+    if os.path.isfile(stale_nested):
+        try:
+            os.remove(stale_nested)
+            print("Removed stale nested build stamp: %s" % stale_nested)
+        except OSError:
+            pass
 
 
 def _read_machine_id():

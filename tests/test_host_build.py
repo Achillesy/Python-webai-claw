@@ -215,6 +215,33 @@ class InstallCopiesStampTests(unittest.TestCase):
                                 for url, _dst in downloaded),
                             "stamp was not fetched from the extension base: %r" % (downloaded,))
 
+    def test_standalone_fetch_removes_stale_nested_stamp(self):
+        # A machine that ran the pre-f3b162f standalone installer has a
+        # stale copy at INSTALL_DIR/extension/host-build.json; the next
+        # install must remove it so only the real stamp remains.
+        install = self._load_install()
+        with tempfile.TemporaryDirectory() as tmp:
+            install_dir = os.path.join(tmp, "install")
+            doc_dir = os.path.join(tmp, "docs")
+            nested = os.path.join(install_dir, "extension", "host-build.json")
+            os.makedirs(os.path.dirname(nested))
+            with open(nested, "w", encoding="utf-8") as f:
+                json.dump({"build": 0, "sha256": "z" * 64}, f)
+            install.INSTALL_DIR = install_dir
+            install.DOC_DIR = doc_dir
+            install.HERE = None
+            install._net_base_or_raise = lambda: "https://example.invalid/base"
+
+            def fake_download(url, dst, timeout=20):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with open(dst, "wb") as f:
+                    f.write(b"stub")
+
+            install._download = fake_download
+            install.fetch_files()
+            self.assertFalse(os.path.exists(nested))
+            self.assertTrue(os.path.isfile(os.path.join(install_dir, "host-build.json")))
+
 
 if __name__ == "__main__":
     unittest.main()
