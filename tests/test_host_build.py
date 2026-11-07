@@ -182,6 +182,39 @@ class InstallCopiesStampTests(unittest.TestCase):
             self.assertTrue(any("build stamp present" in l and l.startswith("FAIL")
                                 for l in lines))
 
+    def test_standalone_fetch_places_stamp_at_install_root(self):
+        # Regression test for the 2026-11-07 one-liner bug: the standalone
+        # branch downloaded the stamp as "extension/host-build.json", so
+        # _download_one nested it at INSTALL_DIR/extension/host-build.json
+        # where the host never looks (it reads INSTALL_DIR/host-build.json)
+        # and the host kept reporting build 0 after a successful install.
+        install = self._load_install()
+        with tempfile.TemporaryDirectory() as tmp:
+            install_dir = os.path.join(tmp, "install")
+            doc_dir = os.path.join(tmp, "docs")
+            install.INSTALL_DIR = install_dir
+            install.DOC_DIR = doc_dir
+            install.HERE = None
+            install._net_base_or_raise = lambda: "https://example.invalid/base"
+            downloaded = []
+
+            def fake_download(url, dst, timeout=20):
+                downloaded.append((url, dst))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with open(dst, "wb") as f:
+                    f.write(b"stub")
+
+            install._download = fake_download
+            install.fetch_files()
+            stamp = os.path.join(install_dir, "host-build.json")
+            self.assertTrue(os.path.isfile(stamp),
+                            "standalone fetch did not place host-build.json at install root")
+            self.assertFalse(os.path.exists(os.path.join(install_dir, "extension")),
+                             "stamp nested under INSTALL_DIR/extension/ (host never reads it there)")
+            self.assertTrue(any(url.endswith("/extension/host-build.json")
+                                for url, _dst in downloaded),
+                            "stamp was not fetched from the extension base: %r" % (downloaded,))
+
 
 if __name__ == "__main__":
     unittest.main()

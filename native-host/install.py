@@ -188,7 +188,11 @@ def fetch_files():
         print("Copied host build stamp from %s" % repo_root)
     elif net_base is not None:
         try:
-            _download_one("extension/host-build.json", doc_base, dst_dir=INSTALL_DIR)
+            # Flat name from the extension base: _download_one joins the
+            # name onto dst_dir, so passing "extension/host-build.json"
+            # would land the stamp at INSTALL_DIR/extension/host-build.json
+            # where the host never looks (it reads INSTALL_DIR/host-build.json).
+            _download_one("host-build.json", doc_base + "/extension", dst_dir=INSTALL_DIR)
             print("Downloaded host build stamp.")
         except Exception as e:
             print("WARNING: could not fetch host build stamp (%s); "
