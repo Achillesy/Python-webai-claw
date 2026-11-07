@@ -76,6 +76,18 @@ All notable changes to webai-claw. Format follows
   behaviour is covered by a framed stdin/stdout test.
 - The skill index cap is now enforced after sorting instead of
   mid-scan, so the entry cap and the byte cap are both honoured.
+- `skill_check.py --library` no longer fails on a clean install:
+  `custom/README.md` is exempt from skill validation, as AI-AGENT.md
+  section 2.6.1 and the `write_file` path in `hostlib/files.py` already
+  specified. The library check only skipped `AI-AGENT.md`, so the
+  installer-created README was reported as a missing-frontmatter error
+  and a fresh host exited 1 on its own health check.
+- Skill validation no longer reports every skill as a duplicate of
+  itself when the library path is not normalized. On Windows the
+  default `~/webai-claw-skills` expands to a path mixing `/` and `\`,
+  and `os.scandir()` entry paths built from it never equal
+  `os.path.abspath()`, so the duplicate scan compared each file with
+  itself and warned. Both sides now compare `normcase(abspath(...))`.
 
 ### Notes
 

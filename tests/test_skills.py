@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "native-host"))
 from hostlib.skills import (  # noqa: E402
     check_skill_library,
     parse_skill,
+    skill_platform,
     skill_index,
     skill_index_detailed,
     validate_skill_file,
@@ -45,9 +46,10 @@ class SkillIndexTests(unittest.TestCase):
 
     def test_platform_filter_and_unknown_platform(self):
         with tempfile.TemporaryDirectory() as tmp:
-            # This VM is linux; a windows-only skill must not appear.
-            write_skill(tmp, "win.md",
-                        "name: winonly\ndescription: Windows only.\nplatforms: windows\n")
+            # A skill for another platform must not appear on this one.
+            other = "macos" if skill_platform() != "macos" else "windows"
+            write_skill(tmp, "other.md",
+                        "name: otheronly\ndescription: Other platform.\nplatforms: %s\n" % other)
             write_skill(tmp, "bad.md",
                         "name: badplat\ndescription: Bad platform.\nplatforms: banana\n")
             self.assertEqual(skill_index(tmp), [])
@@ -156,6 +158,40 @@ class SkillIndexTests(unittest.TestCase):
             meta = parse_skill(path, tmp)
             self.assertEqual(meta["description"], "Quoted desc.")
             self.assertEqual(meta["triggers"], ["alpha", "beta"])
+
+
+class PathNormalizationTests(unittest.TestCase):
+    def test_unnormalized_skills_dir_does_not_self_duplicate(self):
+        # os.scandir() entry paths inherit the skills_dir string, so an
+        # unnormalized directory (on Windows the default
+        # ~/webai-claw-skills mixes separators) made every skill look
+        # like a duplicate of itself.
+        with tempfile.TemporaryDirectory() as tmp:
+            write_skill(tmp, "solo.md",
+                        "name: solo\ndescription: Solo.\nplatforms: any\n")
+            alias = os.path.join(tmp, ".")
+            report = validate_skill_file(os.path.join(tmp, "solo.md"), alias)
+            self.assertEqual(report["errors"], [])
+            self.assertFalse(
+                any("duplicate name" in w for w in report["warnings"]),
+                report["warnings"],
+            )
+            self.assertEqual(check_skill_library(alias)["problems"], [])
+
+    def test_check_library_exempts_custom_readme(self):
+        # The installer writes custom/README.md; it documents the folder
+        # and is not a skill (AI-AGENT.md 2.6.1, hostlib/files.py).
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = os.path.join(tmp, "custom")
+            os.makedirs(custom)
+            readme = os.path.join(custom, "README.md")
+            with open(readme, "w", encoding="utf-8") as f:
+                f.write("# Custom skills\n\nPut your own skills here.\n")
+            write_skill(tmp, "good.md",
+                        "name: good\ndescription: Good.\nplatforms: any\n")
+            result = check_skill_library(tmp)
+            self.assertEqual(result["problems"], [])
+            self.assertEqual([s["name"] for s in result["skills"]], ["good"])
 
 
 class SkillCheckScriptTests(unittest.TestCase):

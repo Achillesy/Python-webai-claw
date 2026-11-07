@@ -47,6 +47,22 @@ def inside_dir(path, directory):
         return False
 
 
+def _same_path(a, b):
+    """Compare two paths after normalizing case and separators.
+
+    os.scandir() builds each entry path from the directory string it was
+    given, so a directory like ~/webai-claw-skills (which expanduser
+    renders with mixed separators on Windows) yields entry paths that
+    never equal os.path.abspath() output. Without normalization the
+    duplicate scan sees every skill as a duplicate of itself.
+    """
+    try:
+        return (os.path.normcase(os.path.abspath(a))
+                == os.path.normcase(os.path.abspath(b)))
+    except (OSError, ValueError):
+        return False
+
+
 def custom_skill_error(data):
     """Return an error string for an invalid custom skill, or None."""
     if len(data) > MAX_SKILL_BYTES:
@@ -354,7 +370,7 @@ def validate_skill_file(path, skills_dir=SKILLS_DIR):
             except OSError:
                 continue
             for entry in entries:
-                if entry.path == os.path.abspath(path) or not entry.name.endswith(".md"):
+                if _same_path(entry.path, path) or not entry.name.endswith(".md"):
                     continue
                 if not entry.is_file(follow_symlinks=False):
                     continue
@@ -404,6 +420,10 @@ def check_skill_library(skills_dir=SKILLS_DIR):
             continue
         for entry in entries:
             if not entry.name.endswith(".md") or entry.name == "AI-AGENT.md":
+                continue
+            if entry.name == "README.md" and _same_path(directory, custom_dir):
+                # custom/README.md documents the folder; it is not a skill
+                # (hostlib/files.py exempts it from write-time validation).
                 continue
             if not entry.is_file(follow_symlinks=False):
                 problems.append({
