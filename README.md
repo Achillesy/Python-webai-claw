@@ -59,6 +59,12 @@ Windows PowerShell:
 py -3 -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Achillesy/Python-webai-claw/master/native-host/install.py').read())"
 ```
 
+> **No Python yet?** If the command says `python3` / `py` is not found, install
+> Python first, then re-run the command above. Windows: Microsoft Store →
+> search "Python", or PowerShell: `winget install Python.Python.3.13`.
+> macOS: `xcode-select --install` (Command Line Tools include Python 3), or
+> download it from [python.org](https://www.python.org/downloads/).
+
 The installer creates `~/.webai-claw/` for the host and runtime files, and
 `~/webai-claw-skills/` for user-facing guides. It registers the Native
 Messaging host with Chrome. It is idempotent; re-run it to update the host
