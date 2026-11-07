@@ -45,6 +45,16 @@ All notable changes to webai-claw. Format follows
 
 ### Fixed
 
+- Background service worker no longer throws `ReferenceError:
+  normalizeSession is not defined` on every content-script `hello`:
+  the 5a2f1af refactor moved `normalizeSession` into `session.js`, but
+  `background.js` kept calling the bare name and never imported that
+  module, so the page never bound (session stayed empty) and Connect
+  could never succeed. `background.js` now loads `session.js` via
+  `importScripts` and calls `WebAIClawSession.normalizeSession` at the
+  three call sites; `tests/test_background_split.js` now drives the
+  `hello` / `session_adopted` / `session_changed` handlers and asserts
+  the session is recorded and normalized.
 - A non-object native message no longer crashes the host loop; it gets an
   `error` reply and the host keeps listening.
 - A JSON `null` frame no longer terminates the host: end-of-input now

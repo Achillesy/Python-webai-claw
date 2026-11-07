@@ -2,7 +2,7 @@
 // Badge is a global state: blank (not connected), ✓ (connected), or ...
 // (native host has been running a command for 5s). Errors are not badges.
 // System notifications are limited to disconnected / waiting for user.
-importScripts("background-ui.js");
+importScripts("background-ui.js", "session.js");
 const MACHINE_KEY = "mh_machine_id";
 
 const HOST = "com.webai.claw";
@@ -362,7 +362,7 @@ chrome.runtime.onConnect.addListener((pagePort) => {
     if (msg.type === "hello") {
       const info = pageInfo.get(pagePort) || {};
       info.binding_id = msg.binding_id || info.binding_id;
-      info.session = normalizeSession(msg.session || info.session);
+      info.session = WebAIClawSession.normalizeSession(msg.session || info.session);
       info.ai = msg.ai || info.ai;
       info.url = msg.url || info.url;
       info.title = msg.title || info.title;
@@ -371,7 +371,7 @@ chrome.runtime.onConnect.addListener((pagePort) => {
     }
     if (msg.type === "session_adopted") {
       const info = pageInfo.get(pagePort) || {};
-      info.session = normalizeSession(msg.session || info.session);
+      info.session = WebAIClawSession.normalizeSession(msg.session || info.session);
       info.ai = msg.ai || info.ai;
       pageInfo.set(pagePort, info);
       if (activeBinding && activeBinding.port === pagePort &&
@@ -400,7 +400,7 @@ chrome.runtime.onConnect.addListener((pagePort) => {
     }
     if (msg.type === "session_changed") {
       const info = pageInfo.get(pagePort) || {};
-      info.session = normalizeSession(msg.session || "");
+      info.session = WebAIClawSession.normalizeSession(msg.session || "");
       info.ai = msg.ai || info.ai;
       pageInfo.set(pagePort, info);
       if (activeBinding && activeBinding.port === pagePort) {
