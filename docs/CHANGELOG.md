@@ -55,6 +55,18 @@ All notable changes to webai-claw. Format follows
   three call sites; `tests/test_background_split.js` now drives the
   `hello` / `session_adopted` / `session_changed` handlers and asserts
   the session is recorded and normalized.
+- Popup no longer stuck at "checking…" forever: the efc150c split had
+  dropped the background's four scheduler-state declarations
+  (`portGen`, `schedQueue`, `hostBusy`, `running`), so the first
+  `updateBadge()` call — inside the `get_state` reply path, before
+  `sendResponse` — threw `ReferenceError: running is not defined` and
+  the popup never rendered. The declarations are restored (as in
+  v1.1.8), and the same split had also dropped `browserName()`, which
+  broke the Connect handshake; it is restored too.
+  `tests/test_background_split.js` now drives `get_state`, `ping_test`,
+  `exec`, `connect`, and `disconnect` against a fake native port and
+  asserts every step responds; with the declarations removed it fails
+  with "get_state never responded", reproducing the reported symptom.
 - A non-object native message no longer crashes the host loop; it gets an
   `error` reply and the host keeps listening.
 - A JSON `null` frame no longer terminates the host: end-of-input now

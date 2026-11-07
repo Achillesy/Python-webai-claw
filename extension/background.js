@@ -19,6 +19,18 @@ const hostRequests = new Map();    // one-shot host request id -> {cb, timer}
 const connectWaiters = new Map();  // pagePort -> {cb, host, binding_id, timer}
 let activeBinding = null;          // {binding_id, session, ai, port, tabId} for this browser
 const hostInfo = { machine_id: null, hostname: null, platform: null, shell: null, host_version: null };
+// Scheduler state. These four were dropped by the efc150c split and
+// restore the v1.1.8 declarations: without them every read (updateBadge,
+// pump, curGenOf) throws ReferenceError and the popup never leaves
+// "checking…" because get_state's sendResponse is never reached.
+const portGen = new Map();  // pagePort -> current generation (default 0)
+const schedQueue = [];      // [{port, kind, msg, session, gen, graceTimer}]
+let hostBusy = false;
+let running = null;         // {id, port, session, gen, cmd, startTime}
+function browserName() {
+  try { return (navigator.userAgent || "").indexOf("Edg/") !== -1 ? "edge" : "chrome"; }
+  catch (e) { return "chrome"; }
+}
 function curGenOf(port) {
   const g = portGen.get(port);
   return (typeof g === "number") ? g : 0;
