@@ -669,6 +669,7 @@ def run_bundle(msg):
         "platform": sys.platform,
         "shell": shell_name(),
         "host_version": HOST_VERSION,
+        "host_build": INSTALLED_HOST_BUILD,
         "guide": guide,
         "handoff": handoff,
         "skills": skill_index(),
@@ -755,6 +756,7 @@ def run_diag(msg):
             "session": msg.get("session") or "",
             "ai": msg.get("ai") or "",
             "host_version": HOST_VERSION,
+            "host_build": INSTALLED_HOST_BUILD,
             "lease": lease_status(),
             "pid": os.getpid(),
             "history_size": len(history_store.HISTORY),
@@ -844,6 +846,7 @@ def handle_connect(msg):
             "platform": sys.platform,
             "shell": shell_name(),
             "host_version": HOST_VERSION,
+            "host_build": INSTALLED_HOST_BUILD,
             "session": msg.get("session") or "",
             "ai": msg.get("ai") or "",
             "took_over_stale": bool(result.get("took_over_stale")),
@@ -886,6 +889,7 @@ def handle_status(msg):
         "platform": sys.platform,
         "shell": shell_name(),
         "host_version": HOST_VERSION,
+        "host_build": INSTALLED_HOST_BUILD,
         "lease": lease_status(),
     }
 
@@ -941,6 +945,7 @@ def handle(msg):
             "platform": sys.platform,
             "machine_id": MACHINE_ID,
             "host_version": HOST_VERSION,
+            "host_build": INSTALLED_HOST_BUILD,
             "shell": shell_name(),
             "lease": lease_status(),
         }
@@ -976,6 +981,9 @@ BROWSER_ALIVE = True
 SHUTDOWN_EVENT = threading.Event()
 LEASE_BINDING = None
 MACHINE_ID = None
+# Build stamp read once at startup from the installed host-build.json
+# (0 when the install predates the stamp: older than any real build).
+INSTALLED_HOST_BUILD = read_installed_host_build()
 
 
 def _on_signal(signum, frame):
@@ -1063,8 +1071,9 @@ def main():
             except (OSError, ValueError):
                 pass
     threading.Thread(target=heartbeat_loop, daemon=True).start()
-    log("host started platform=%s hostname=%s machine_id=%s history=%d version=%s" % (
-        sys.platform, socket.gethostname(), MACHINE_ID, len(history_store.HISTORY), HOST_VERSION))
+    log("host started platform=%s hostname=%s machine_id=%s history=%d version=%s build=%s" % (
+        sys.platform, socket.gethostname(), MACHINE_ID, len(history_store.HISTORY), HOST_VERSION,
+        INSTALLED_HOST_BUILD))
     while _process_one_message():
         pass
     BROWSER_ALIVE = False

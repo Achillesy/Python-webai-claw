@@ -7,6 +7,17 @@ All notable changes to webai-claw. Format follows
 
 ### Added
 
+- Host build stamp: `scripts/sync_host_build.py` hashes the installed host
+  files and maintains a monotonic build number in
+  `extension/host-build.json`, decoupled from the store version (which
+  stays 1.2.5 across host-only fixes). `install.py` copies the stamp into
+  the install directory, the host reports it as `host_build` in every
+  response, and the popup/onboarding warn when the installed build is
+  older than the extension's bundled one — so a version-unchanged
+  reinstall can no longer silently leave a stale host in place. The
+  stamp is also checked by `install.py --verify`. A missing stamp reads
+  as build 0 (older than any real build). `tests/test_host_build.py`
+  fails when the checked-in fingerprint is stale.
 - `extension/adapter-check.js`: validates a site adapter's required
   methods at load time; an incomplete adapter disables the content script
   with a named error instead of failing silently later.

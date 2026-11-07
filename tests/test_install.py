@@ -101,6 +101,8 @@ class InstallCompletenessTests(unittest.TestCase):
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "w", encoding="utf-8") as f:
                     f.write("# stub\n")
+            with open(os.path.join(install_dir, "host-build.json"), "w", encoding="utf-8") as f:
+                json.dump({"build": 1, "sha256": "x" * 64}, f)
             with open(os.path.join(install_dir, "machine.json"), "w", encoding="utf-8") as f:
                 json.dump({"machine_id": str(uuid.uuid4())}, f)
             ok, _lines = install.verify_install(install_dir, doc_dir)

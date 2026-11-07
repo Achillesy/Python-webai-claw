@@ -18,7 +18,7 @@ const pageInfo = new Map();        // pagePort -> {binding_id, session, ai, url,
 const hostRequests = new Map();    // one-shot host request id -> {cb, timer}
 const connectWaiters = new Map();  // pagePort -> {cb, host, binding_id, timer}
 let activeBinding = null;          // {binding_id, session, ai, port, tabId} for this browser
-const hostInfo = { machine_id: null, hostname: null, platform: null, shell: null, host_version: null };
+const hostInfo = { machine_id: null, hostname: null, platform: null, shell: null, host_version: null, host_build: null };
 // Scheduler state. These four were dropped by the efc150c split and
 // restore the v1.1.8 declarations: without them every read (updateBadge,
 // pump, curGenOf) throws ReferenceError and the popup never leaves
@@ -216,6 +216,7 @@ function ensureNativePort() {
       if (msg.platform) hostInfo.platform = msg.platform;
       if (msg.shell) hostInfo.shell = msg.shell;
       if (msg.host_version) hostInfo.host_version = msg.host_version;
+      if (typeof msg.host_build === "number") hostInfo.host_build = msg.host_build;
       // Cache the local machine UUID for content-script routing; the hostname is a label.
       try {
         const obj = {};
@@ -234,7 +235,8 @@ function ensureNativePort() {
         pingTests.delete(msg.id);
         clearTimeout(pt.timer);
         try { pt.sendResponse({ ok: true, hostname: msg.hostname,
-          machine_id: msg.machine_id, platform: msg.platform }); } catch (e) {}
+          machine_id: msg.machine_id, platform: msg.platform,
+          host_build: msg.host_build }); } catch (e) {}
       }
       return;
     }
@@ -570,6 +572,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (st.platform) hostInfo.platform = st.platform;
           if (st.shell) hostInfo.shell = st.shell;
           if (st.host_version) hostInfo.host_version = st.host_version;
+          if (typeof st.host_build === "number") hostInfo.host_build = st.host_build;
           try {
             const obj = {};
             if (st.machine_id) obj[MACHINE_KEY] = st.machine_id;
@@ -666,6 +669,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (res.platform) hostInfo.platform = res.platform;
         if (res.shell) hostInfo.shell = res.shell;
         if (res.host_version) hostInfo.host_version = res.host_version;
+        if (typeof res.host_build === "number") hostInfo.host_build = res.host_build;
         if (activeBinding && activeBinding.port !== found.port) {
           dropQueueForBinding(activeBinding.port, activeBinding.binding_id,
                               "lease taken over; queued command discarded");

@@ -5,6 +5,17 @@ var statusEl = document.getElementById('status');
 var hintEl = document.getElementById('status-hint');
 var successEl = document.getElementById('success');
 
+// Expected host build, from the bundled host-build.json (see popup.js).
+// A host reporting a smaller build (or none, for pre-stamp installs) is
+// outdated: the version alone cannot tell, it stays 1.2.5 across
+// host-only fixes.
+var expectedHostBuild = null;
+fetch(chrome.runtime.getURL('host-build.json')).then(function (r) {
+  return r.json();
+}).then(function (j) {
+  if (j && typeof j.build === 'number') expectedHostBuild = j.build;
+}).catch(function () {});
+
 document.querySelectorAll('[data-copy]').forEach(function (btn) {
   btn.addEventListener('click', function () {
     var text = document.getElementById(btn.getAttribute('data-copy')).textContent;
@@ -32,6 +43,15 @@ function testConnection() {
       }
       if (res && res.ok) {
         var mid = res.machine_id || '';
+        var installedBuild = (typeof res.host_build === 'number') ? res.host_build : 0;
+        if (typeof expectedHostBuild === 'number' && installedBuild < expectedHostBuild) {
+          setStatus('warn', 'Connected — ' + (res.hostname || 'this computer'),
+            'Host is out of date (build ' + installedBuild + ', this extension expects ' +
+            expectedHostBuild + '). Reinstall the host program with the command above, ' +
+            'then click Test Connection again.');
+          successEl.style.display = 'none';
+          return;
+        }
         setStatus('ok', 'Connected — ' + (res.hostname || 'this computer'), '');
         document.getElementById('uuid').textContent = mid;
         document.getElementById('example').textContent =

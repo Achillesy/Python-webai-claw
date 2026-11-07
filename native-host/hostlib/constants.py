@@ -4,10 +4,43 @@ Keep paths relative to the installed host directory so the same code works
 from a git checkout and from ~/.webai-claw.
 """
 
+import json
 import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOST_VERSION = "1.2.5"
+
+# Monotonic host build stamp (extension/host-build.json), decoupled from
+# the store version: HOST_VERSION stays 1.2.5 across host-only fixes, so
+# the version alone can never tell the extension the installed host is
+# outdated. install.py copies the stamp into the install directory; the
+# host reports it as host_build in every response. A missing or unreadable
+# stamp reads as 0, i.e. older than any real build, so a pre-stamp install
+# is correctly reported as outdated.
+HOST_BUILD_PATH = os.path.join(BASE_DIR, "host-build.json")
+
+
+def read_installed_host_build(base_dir=None):
+    """Return the installed host build number, or 0 when unknown.
+
+    Reads <base_dir>/host-build.json; in a git checkout the installed
+    copy is absent, so it falls back to <repo>/extension/host-build.json
+    next to native-host/.
+    """
+    base = base_dir or BASE_DIR
+    candidates = [
+        os.path.join(base, "host-build.json"),
+        os.path.join(os.path.dirname(base), "extension", "host-build.json"),
+    ]
+    for path in candidates:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                build = json.load(f).get("build")
+            if isinstance(build, int) and build >= 0:
+                return build
+        except (OSError, ValueError, AttributeError):
+            continue
+    return 0
 
 LOG_DIR = os.path.join(BASE_DIR, "log")
 LOG_PATH = os.path.join(LOG_DIR, "host.log")

@@ -177,6 +177,25 @@ def fetch_files():
         for name in DOC_FILES:
             _download_one(name, doc_base, dst_dir=DOC_DIR)
         print("Downloaded AI guides.")
+    # Host build stamp (extension/host-build.json): the monotonic counter
+    # the extension compares against the installed host's reported build
+    # to detect an outdated host. Refreshed on every reinstall, like the
+    # guides. A missing stamp is not fatal: the host reports build 0 and
+    # the extension prompts a reinstall, which self-corrects.
+    build_src = os.path.join(repo_root, "extension", "host-build.json") if repo_root else None
+    if build_src and os.path.isfile(build_src):
+        shutil.copy2(build_src, os.path.join(INSTALL_DIR, "host-build.json"))
+        print("Copied host build stamp from %s" % repo_root)
+    elif net_base is not None:
+        try:
+            _download_one("extension/host-build.json", doc_base, dst_dir=INSTALL_DIR)
+            print("Downloaded host build stamp.")
+        except Exception as e:
+            print("WARNING: could not fetch host build stamp (%s); "
+                  "the extension will prompt a reinstall" % e)
+    else:
+        print("WARNING: host build stamp not found in checkout; "
+              "run python3 scripts/sync_host_build.py first")
 
 
 def _read_machine_id():
@@ -332,6 +351,21 @@ def verify_install(install_dir=INSTALL_DIR, doc_dir=DOC_DIR, repo_root=None):
                     check(expected == actual, "installed host file matches repo: %s" % name)
                 except OSError as e:
                     check(False, "installed host file readable: %s (%s)" % (name, e))
+    build_path = os.path.join(install_dir, "host-build.json")
+    check(os.path.isfile(build_path),
+          "installed host build stamp present: host-build.json")
+    if repo_root:
+        expected_stamp = os.path.join(repo_root, "extension", "host-build.json")
+        if os.path.isfile(expected_stamp) and os.path.isfile(build_path):
+            try:
+                with open(expected_stamp, "rb") as f:
+                    expected = f.read()
+                with open(build_path, "rb") as f:
+                    actual = f.read()
+                check(expected == actual,
+                      "installed host build stamp matches repo")
+            except OSError as e:
+                check(False, "installed host build stamp readable (%s)" % e)
     mid_path = os.path.join(install_dir, "machine.json")
     mid = None
     try:

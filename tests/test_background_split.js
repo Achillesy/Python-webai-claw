@@ -20,7 +20,8 @@ function fakePort() {
     _h: null,
     postMessage(msg) {
       const base = { id: msg.id, machine_id: 'm-1', hostname: 'TestHost',
-                     platform: 'win32', shell: 'powershell', host_version: '1.2.5' };
+                     platform: 'win32', shell: 'powershell', host_version: '1.2.5',
+                     host_build: 7 };
       let reply = null;
       if (msg.type === 'ping') reply = { type: 'pong', ...base };
       else if (msg.type === 'status') reply = { type: 'state', ...base,
@@ -153,6 +154,7 @@ async function main() {
   assert.strictEqual(got.host.machine_id, 'm-1');
   assert.strictEqual(got.host.hostname, 'TestHost');
   assert.strictEqual(got.host.host_version, '1.2.5');
+  assert.strictEqual(got.host.host_build, 7, 'get_state did not carry host_build');
   console.log('background get_state OK');
 
   // ping_test (Test Bridge) over the same native port.
@@ -161,6 +163,7 @@ async function main() {
   await tick();
   assert.ok(got, 'ping_test never responded');
   assert.strictEqual(got.ok, true, 'ping_test failed: ' + JSON.stringify(got));
+  assert.strictEqual(got.host_build, 7, 'ping_test did not carry host_build');
   console.log('background ping_test OK');
 
   // exec: exercises the scheduler state (schedQueue, portGen, hostBusy,

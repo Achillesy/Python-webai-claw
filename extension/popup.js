@@ -25,6 +25,18 @@ var machineId = null;
 var notice = '';
 var noticeUntil = 0;
 
+// Expected host build, from the bundled host-build.json. The build is a
+// monotonic counter that only moves when the host files change (see
+// scripts/sync_host_build.py); the store version stays 1.2.5 across
+// host-only fixes, so it cannot tell an outdated host apart. A host
+// reporting a smaller build (or none, for pre-stamp installs) is outdated.
+var expectedHostBuild = null;
+fetch(chrome.runtime.getURL('host-build.json')).then(function (r) {
+  return r.json();
+}).then(function (j) {
+  if (j && typeof j.build === 'number') expectedHostBuild = j.build;
+}).catch(function () {});
+
 function send(type, payload, cb) {
   var msg = Object.assign({ type: type }, payload || {});
   try {
@@ -158,6 +170,12 @@ function render(st) {
   if (hostOk && !tab) lines.push('Open a supported AI chat tab.');
   if (hostOk && tab && !tab.supported) {
     lines.push('This tab is not a supported AI chat. Open DeepSeek or Muse.');
+  }
+  var installedBuild = (typeof host.host_build === 'number') ? host.host_build : 0;
+  if (hostOk && typeof expectedHostBuild === 'number' && installedBuild < expectedHostBuild) {
+    lines.push('Host is out of date (build ' + installedBuild +
+      ', this extension expects ' + expectedHostBuild +
+      '). Reinstall the host program, then click Connect again.');
   }
   els.detail.textContent = lines.join('\n');
 
