@@ -2,7 +2,7 @@
 
 This is an UPDATE submission: both stores already list 1.1.8
 (Chrome `lfdedknlfjieigbinhilhhkcedadifdl`,
-Edge `aammomamjknhhblplamnipopncbfoeoh`). No new extension ID is
+Edge `aammomamjkhnhblplamnipopncbfoeoh`). No new extension ID is
 assigned; the store IDs are already in `EXTENSION_IDS` in
 `native-host/install.py`. Keep the dev ID
 `feifgnelfehkjlimiolepkmffgbjcong` for local development.

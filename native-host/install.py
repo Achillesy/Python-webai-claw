@@ -28,7 +28,7 @@ HOST_NAME = "com.webai.claw"
 EXTENSION_IDS = [
     "feifgnelfehkjlimiolepkmffgbjcong",  # dev build (unpacked)
     "lfdedknlfjieigbinhilhhkcedadifdl",  # Chrome Web Store build (v1.1.8)
-    "aammomamjknhhblplamnipopncbfoeoh",  # Edge Add-ons build (v1.1.8)
+    "aammomamjkhnhblplamnipopncbfoeoh",  # Edge Add-ons build (v1.1.8)
 ]
 PROJECT_URL = "https://github.com/Achillesy/Python-webai-claw"
 # Minimum interpreter for the host. The host code itself uses nothing
