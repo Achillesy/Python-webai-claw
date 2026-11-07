@@ -28,7 +28,7 @@ network port.
 
 - Google Chrome (desktop).
 - macOS or Windows.
-- Python 3 on the machine that will run commands.
+- Python 3.9 or newer on the machine that will run commands.
 - One-time installation of the local host.
 
 The Chrome extension is only the browser half. The local host must be installed
@@ -68,7 +68,10 @@ py -3 -c "import urllib.request; exec(urllib.request.urlopen('https://raw.github
 The installer creates `~/.webai-claw/` for the host and runtime files, and
 `~/webai-claw-skills/` for user-facing guides. It registers the Native
 Messaging host with Chrome. It is idempotent; re-run it to update the host
-and guides.
+and guides. It also creates a private virtual environment
+(`~/.webai-claw/.venv`) from the Python that runs the installer, so the host
+keeps running on that interpreter even if the system Python later changes;
+an existing virtual environment is never replaced on reinstall.
 
 ### Extending skills
 

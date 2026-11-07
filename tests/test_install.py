@@ -10,10 +10,12 @@ import ast
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 import uuid
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOST_DIR = os.path.join(ROOT, "native-host")
@@ -111,6 +113,69 @@ class InstallCompletenessTests(unittest.TestCase):
             ok, lines = install.verify_install(install_dir, doc_dir)
             self.assertFalse(ok)
             self.assertTrue(any("skills.py" in line and line.startswith("FAIL") for line in lines))
+
+    def test_python_version_floor_is_3_9(self):
+        install = _load_install()
+        self.assertEqual(install.MIN_PYTHON, (3, 9))
+        ok, _msg = install.check_python_version((3, 9, 0))
+        self.assertTrue(ok)
+        ok, _msg = install.check_python_version((3, 13, 0))
+        self.assertTrue(ok)
+        ok, msg = install.check_python_version((3, 8, 10))
+        self.assertFalse(ok)
+        self.assertIn("3.9", msg)
+        self.assertIn("python.org", msg)
+        # The interpreter running this suite must pass its own floor.
+        ok, _msg = install.check_python_version()
+        self.assertTrue(ok)
+
+    def test_ensure_venv_creates_from_running_interpreter(self):
+        install = _load_install()
+        with tempfile.TemporaryDirectory() as tmp:
+            install.INSTALL_DIR = tmp
+            calls = []
+
+            def fake_run(cmd, **kwargs):
+                calls.append(cmd)
+                venv_dir = cmd[-1]
+                python = install.venv_python(venv_dir)
+                os.makedirs(os.path.dirname(python), exist_ok=True)
+                with open(python, "w", encoding="utf-8") as f:
+                    f.write("# fake venv python\n")
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with mock.patch.object(subprocess, "run", fake_run):
+                self.assertTrue(install.ensure_venv())
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], sys.executable)
+            self.assertEqual(calls[0][1:3], ["-m", "venv"])
+            self.assertEqual(calls[0][-1], os.path.join(tmp, ".venv"))
+
+    def test_ensure_venv_leaves_existing_venv_alone(self):
+        install = _load_install()
+        with tempfile.TemporaryDirectory() as tmp:
+            install.INSTALL_DIR = tmp
+            python = install.venv_python(os.path.join(tmp, ".venv"))
+            os.makedirs(os.path.dirname(python), exist_ok=True)
+            with open(python, "w", encoding="utf-8") as f:
+                f.write("# existing venv python\n")
+
+            def exploding_run(cmd, **kwargs):
+                raise AssertionError("venv must not be recreated: %r" % (cmd,))
+
+            with mock.patch.object(subprocess, "run", exploding_run):
+                self.assertTrue(install.ensure_venv())
+
+    def test_ensure_venv_failure_warns_and_continues(self):
+        install = _load_install()
+        with tempfile.TemporaryDirectory() as tmp:
+            install.INSTALL_DIR = tmp
+
+            def failing_run(cmd, **kwargs):
+                return subprocess.CompletedProcess(cmd, 1, stderr="ensurepip is not available")
+
+            with mock.patch.object(subprocess, "run", failing_run):
+                self.assertFalse(install.ensure_venv())
 
 
 if __name__ == "__main__":

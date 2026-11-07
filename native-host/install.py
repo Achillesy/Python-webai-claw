@@ -19,6 +19,7 @@
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -30,6 +31,13 @@ EXTENSION_IDS = [
     "aammomamjknhhblplamnipopncbfoeoh",  # Edge Add-ons build (v1.1.8)
 ]
 PROJECT_URL = "https://github.com/Achillesy/Python-webai-claw"
+# Minimum interpreter for the host. The host code itself uses nothing
+# newer than 3.9 (verified: it runs on the Xcode 3.9 shipped with macOS),
+# so 3.9 is a policy floor, not a technical one: it keeps the "install
+# Python first" prompt from ever firing for ordinary users (macOS ships
+# 3.9; Windows Store / python.org ship 3.12+), while refusing interpreters
+# that no longer receive security fixes.
+MIN_PYTHON = (3, 9)
 try:
     HERE = os.path.dirname(os.path.abspath(__file__))
 except NameError:
@@ -89,6 +97,74 @@ Conventions:
 - Print machine-readable output (JSON lines preferred).
 - Never read secrets; the host already refuses sensitive paths.
 """
+
+
+def check_python_version(version_info=None):
+    """Refuse interpreters below MIN_PYTHON; return (ok, message).
+
+    Pure function of the version tuple so tests can pass fake versions.
+    The message is a prompt, not a fix: the installer never installs
+    Python itself, it only tells the user where to get it.
+    """
+    current = tuple((version_info or sys.version_info)[:2])
+    if current >= MIN_PYTHON:
+        return True, ""
+    return False, (
+        "Python %d.%d or newer is required (this machine has Python %s).\n"
+        "Install a newer Python, then re-run the installer:\n"
+        "  Windows: Microsoft Store -> search \"Python\", or PowerShell:\n"
+        "    winget install Python.Python.3.13\n"
+        "  macOS: download from https://www.python.org/downloads/\n"
+        "    (or: xcode-select --install for the Command Line Tools)"
+        % (MIN_PYTHON[0], MIN_PYTHON[1],
+           ".".join(str(x) for x in (version_info or sys.version_info)[:3]))
+    )
+
+
+def venv_python(venv_dir=None):
+    """Path of the interpreter inside a venv at venv_dir."""
+    venv_dir = venv_dir or os.path.join(INSTALL_DIR, ".venv")
+    if sys.platform == "win32":
+        return os.path.join(venv_dir, "Scripts", "python.exe")
+    return os.path.join(venv_dir, "bin", "python")
+
+
+def ensure_venv():
+    """Create INSTALL_DIR/.venv from the interpreter running this installer.
+
+    The host launchers (host.sh / host.bat) prefer the venv interpreter
+    and fall back to the system Python, so a venv pins the interpreter
+    the host runs on even if the system Python later changes. An existing
+    venv is left alone: re-running the installer never replaces the
+    interpreter a working install already uses. Best-effort: if creation
+    fails (e.g. the venv module is missing), warn and continue — the host
+    still works through the launcher fallback. Returns True when a venv
+    interpreter is present afterwards, False otherwise.
+    """
+    venv_dir = os.path.join(INSTALL_DIR, ".venv")
+    python = venv_python(venv_dir)
+    if os.path.isfile(python):
+        print("Using existing Python virtual environment: %s" % venv_dir)
+        return True
+    # --without-pip: the host is stdlib-only, pip is never used, and
+    # skipping ensurepip lets creation succeed on minimal Pythons where
+    # ensurepip is unavailable. A user who later needs pip can add it
+    # with: <venv>/bin/python -m ensurepip
+    cmd = [sys.executable, "-m", "venv", "--without-pip", venv_dir]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception as e:
+        print("WARNING: could not create Python virtual environment (%s); "
+              "the host will use the system Python instead" % e)
+        return False
+    if proc.returncode != 0 or not os.path.isfile(python):
+        print("WARNING: could not create Python virtual environment "
+              "(%s); the host will use the system Python instead"
+              % (proc.stderr.strip() or "unknown error"))
+        return False
+    print("Created Python virtual environment: %s (Python %s)"
+          % (venv_dir, ".".join(str(x) for x in sys.version_info[:3])))
+    return True
 
 
 def host_launcher():
@@ -430,7 +506,14 @@ def main():
             print(line)
         print("verify: %s" % ("OK" if ok else "FAILED"))
         return 0 if ok else 1
+    # --verify is read-only diagnostics and stays usable on any Python;
+    # the floor only gates an actual install.
+    ok, message = check_python_version()
+    if not ok:
+        print(message)
+        return 1
     install_files()
+    ensure_venv()
     print("Installed host program to %s" % INSTALL_DIR)
 
     if sys.platform == "win32":
