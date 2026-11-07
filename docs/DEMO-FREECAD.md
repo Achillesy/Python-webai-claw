@@ -16,9 +16,9 @@ Reasons:
 - screen recording, cursor control, and file inspection are simpler;
 - the resulting demo is shorter and more reliable.
 
-Use the **webai-claw 1.2.5 development build** for this recording. The 1.1.8
-store build does not have `write_file`, custom skill authoring, or the skill
-index required by this demo.
+Use the **webai-claw 1.2.6 build** for this recording (store or development
+build both work; `write_file`, custom skill authoring, and the skill
+index need 1.2.6+ — the 1.1.8 store build does not have them).
 
 ## 2. Feasibility assessment
 
@@ -27,7 +27,7 @@ index required by this demo.
 | macOS M1 native | High confidence |
 | FreeCAD ARM64 | Native build available |
 | FreeCAD MCP addon | Supports FreeCAD 1.0/1.1 and exposes local XML-RPC on `127.0.0.1:9875` |
-| webai-claw 1.2.5 | Required for `write_file` and custom skill creation |
+| webai-claw 1.2.6 | Required for `write_file` and custom skill creation |
 | DeepSeek web | Existing adapter works |
 | AI-created skill | Feasible: `write_file` writes `custom/AI-FREECAD.md`; the host validates frontmatter |
 | MCP protocol | The demo uses the FreeCAD MCP addon's local RPC endpoint through a small Python bridge; the browser AI is not a native MCP client |
@@ -72,7 +72,7 @@ Recommend measuring the actual internal dimensions before a production print.
 - Python 3 for the native host and bridge.
 - Git.
 - FreeCAD 1.1.x macOS ARM64.
-- webai-claw 1.2.5 unpacked extension and native host.
+- webai-claw 1.2.6 unpacked extension and native host.
 - DeepSeek web chat.
 - Screen recorder that can record a window or screen at 1080p.
 - Microphone muted during recording; voiceover added later.
@@ -139,7 +139,7 @@ Chrome and Edge. It also installs the visible skill library under
    ```text
    ~/webai-claw-demo-src/extension
    ```
-5. Confirm the popup shows extension `v1.2.5` and host `v1.2.5`.
+5. Confirm the popup shows extension `v1.2.6` and host `v1.2.6`.
 
 The development key keeps the extension ID stable and allowlisted by the
 installer. Do not use the 1.1.8 store build for this demo.
@@ -397,7 +397,7 @@ Install native host
 
 Post voiceover topic:
 
-> 这里使用 1.2.5 开发版，因为商店 1.1.8 还不支持 write_file 和技能创建。
+> 这里使用 1.2.6 版，商店 1.1.8 不支持 write_file 和技能创建，1.2.6 已支持。
 
 ### Clip 3: Connect DeepSeek (under 2:00)
 
@@ -532,7 +532,7 @@ Post voiceover topic:
 
 ## 10. Known risks
 
-1. **Development build**: 1.2.5 is required; 1.1.8 lacks `write_file` and skill
+1. **Build**: 1.2.6 is required; 1.1.8 lacks `write_file` and skill
    authoring.
 2. **Addon path**: FreeCAD 1.1 uses
    `~/Library/Application Support/FreeCAD/v1-1/Mod`, not an unversioned path.

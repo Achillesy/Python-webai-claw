@@ -1,5 +1,7 @@
 # webai-claw
 
+[中文](README_zh.md)
+
 Give a web AI hands on your own computer. webai-claw turns a chat request into
 a local command, runs it on your machine, and returns the result to the chat.
 
@@ -159,6 +161,21 @@ the extension. For Blender workflows, ask the AI to use the Blender skill.
   Review them before sending sensitive content.
 
 See [PRIVACY.md](PRIVACY.md) for the data flow.
+
+## Support
+
+webai-claw is free. If it saves you time, buy me a coffee:
+
+- [Ko-fi](https://ko-fi.com/achillesy)
+- [PayPal](https://paypal.me/achillesnewman)
+
+China users can scan:
+
+| WeChat | Alipay |
+|---|---|
+| ![](sponsor/wechat.jpg) | ![](sponsor/alipay.jpg) |
+
+Support is voluntary and changes nothing about the software.
 
 ## License
 

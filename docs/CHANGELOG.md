@@ -5,12 +5,14 @@ All notable changes to webai-claw. Format follows
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-11-07
+
 ### Added
 
 - Host build stamp: `scripts/sync_host_build.py` hashes the installed host
   files and maintains a monotonic build number in
   `extension/host-build.json`, decoupled from the store version (which
-  stays 1.2.5 across host-only fixes). `install.py` copies the stamp into
+  stays 1.2.6 across host-only fixes). `install.py` copies the stamp into
   the install directory, the host reports it as `host_build` in every
   response, and the popup/onboarding warn when the installed build is
   older than the extension's bundled one — so a version-unchanged
@@ -42,6 +44,27 @@ All notable changes to webai-claw. Format follows
   for the installed host, manifests, machine identity, and skill
   directories.
 - `docs/ADAPTER-TEMPLATE.md`: skeleton adapter for a new site.
+- Installer creates a private virtual environment
+  (`~/.webai-claw/.venv`) from the Python that runs it, so the host
+  keeps running on that interpreter even if the system Python later
+  changes; an existing virtual environment is never replaced on
+  reinstall. Creation is best-effort (`--without-pip`, the host is
+  stdlib-only): if it fails, the installer warns and continues, and the
+  host falls back to the system Python through `host.sh` / `host.bat`.
+- Installer enforces a Python 3.9 floor: older interpreters stop with
+  install links (a prompt, not a fix). `--verify` stays usable on any
+  Python. `README.md` Requirements now says "Python 3.9 or newer".
+- "No Python yet?" note in `README.md` and the onboarding page: if the
+  terminal says `python3` / `py` is not found, install Python first
+  (Windows: Microsoft Store or `winget install Python.Python.3.13`;
+  macOS: `xcode-select --install` or python.org), then re-run the
+  command.
+- Full Chinese docs: `README_zh.md` (install/uninstall one-liners use
+  the Gitee mirror) and the Chinese store description
+  `store/listing-zh.txt`.
+- Sponsor QR codes (`sponsor/wechat.jpg`, `sponsor/alipay.jpg`) and a
+  Support section in the READMEs, next to the existing Ko-fi/PayPal
+  links.
 
 ### Changed
 
@@ -102,11 +125,22 @@ All notable changes to webai-claw. Format follows
 
 ### Notes
 
-- Version deliberately unchanged (extension and host stay 1.2.5) on this
-  branch. Host-only changes take effect when the user re-runs the
-  installer; the extension changes (`adapter-check.js`, manifest load
-  order, provisional-session hook) need a store submission before store
-  users get them.
+- Extension and host bumped to 1.2.6; the host build stamp moves to 4
+  because `HOST_VERSION` changed in `native-host/hostlib/constants.py`.
+  Host-only changes take effect when the user re-runs the installer;
+  the extension changes need this store submission before store users
+  get them.
+- Popup simplification and Test Bridge placement shipped in 1.1.3
+  (compact status/action panel; Machine ID and Test Bridge in the
+  collapsed Advanced section).
+- ChatGPT review follow-ups N2 (adapter `ai`/`name` validation), N3
+  (user-visible adapter failure instead of console-only), and N5
+  (`--verify` docs overclaiming all-platform manifest checks) remain
+  open by decision; N4 is covered by `tests/test_install.py`.
+
+### Versions
+
+- Extension and host bumped to 1.2.6.
 
 ## [1.2.5] - 2026-11-04
 

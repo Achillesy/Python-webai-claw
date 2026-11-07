@@ -20,7 +20,7 @@ function fakePort() {
     _h: null,
     postMessage(msg) {
       const base = { id: msg.id, machine_id: 'm-1', hostname: 'TestHost',
-                     platform: 'win32', shell: 'powershell', host_version: '1.2.5',
+                     platform: 'win32', shell: 'powershell', host_version: '1.2.6',
                      host_build: 7 };
       let reply = null;
       if (msg.type === 'ping') reply = { type: 'pong', ...base };
@@ -153,7 +153,7 @@ async function main() {
   assert.strictEqual(got.ok, true, 'get_state not ok: ' + JSON.stringify(got));
   assert.strictEqual(got.host.machine_id, 'm-1');
   assert.strictEqual(got.host.hostname, 'TestHost');
-  assert.strictEqual(got.host.host_version, '1.2.5');
+  assert.strictEqual(got.host.host_version, '1.2.6');
   assert.strictEqual(got.host.host_build, 7, 'get_state did not carry host_build');
   console.log('background get_state OK');
 

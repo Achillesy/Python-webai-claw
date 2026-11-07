@@ -1,0 +1,42 @@
+给网页 AI 一双手，在你自己的电脑上干活。
+
+和 DeepSeek 或 Muse 对话，告诉它你想在自己的电脑上做什么。
+AI 需要动手时，会写一条命令块；webai-claw 通过本机 host 执行这条命令，
+再把结果发回同一个对话。
+
+不用 API 密钥。不用复制粘贴。没有开发者运营的中转服务器。
+
+支持的 AI 对话
+- DeepSeek：chat.deepseek.com
+- Muse：muse.ai
+
+能做什么
+- 在网页 AI 对话里，直接在 macOS 或 Windows 上运行 shell 命令。
+- 把标准输出、标准错误和退出状态发回对话。
+- 把本机文件作为真正的聊天附件上传。
+- 通过本机 API 驱动 Blender 这类本地应用。
+- 同一个对话在多台电脑上打开时，执行目标要明确写出来。
+
+怎么用
+本扩展是 webai-claw 的浏览器一半，还需要免费开源的本机 host，
+在每台要跑命令的机器上安装：
+
+1. 安装本扩展。
+2. 按项目页说明安装本机 host：
+   github.com/Achillesy/Python-webai-claw
+3. 打开一个支持的 AI 对话，在扩展弹出窗口里点 Connect。
+
+本机 host 通过 Chrome Native Messaging 和扩展通信，
+不监听任何网络端口。
+
+隐私与安全
+- 开发者不收集统计数据、广告数据或个人数据。
+- host 不会提示、保存或代填密码。不要把密码放进命令里。
+- SSH 密钥、浏览器 cookie、.env 文件这类敏感路径，文件上传时会被拒绝；单次上传上限 25 MB。
+- 命令输出和上传的文件还是会发到你选的 AI 站点。发送敏感内容前请先检查。
+- 隐私政策：github.com/Achillesy/Python-webai-claw/blob/master/PRIVACY.md
+
+与 DeepSeek 或 Muse 没有任何隶属或背书关系。
+
+免费使用（仅限非商业用途）。开源地址：
+github.com/Achillesy/Python-webai-claw

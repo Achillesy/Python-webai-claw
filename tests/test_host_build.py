@@ -5,7 +5,7 @@ compares against the installed host's reported build. The number only
 moves when the installed host files change: scripts/sync_host_build.py
 hashes native-host/HOST_FILES and bumps it. These tests fail when a host
 change lands without running that script, so the guard cannot silently
-go stale the way the frozen 1.2.5 version did.
+go stale the way the frozen 1.2.6 version did.
 """
 
 import importlib.util

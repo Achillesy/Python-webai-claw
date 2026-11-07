@@ -2,7 +2,7 @@
 """Regenerate extension/host-build.json from the native-host/ tree.
 
 The host build is a monotonic counter, decoupled from the store version:
-HOST_VERSION stays 1.2.5 across host-only fixes so they need no store
+HOST_VERSION stays 1.2.6 across host-only fixes so they need no store
 resubmission, which also means the version can never tell the extension
 whether the installed host is current. The build counter fills that gap:
 it only moves when the installed host files actually change.

@@ -7,7 +7,7 @@ var successEl = document.getElementById('success');
 
 // Expected host build, from the bundled host-build.json (see popup.js).
 // A host reporting a smaller build (or none, for pre-stamp installs) is
-// outdated: the version alone cannot tell, it stays 1.2.5 across
+// outdated: the version alone cannot tell, it stays 1.2.6 across
 // host-only fixes.
 var expectedHostBuild = null;
 fetch(chrome.runtime.getURL('host-build.json')).then(function (r) {

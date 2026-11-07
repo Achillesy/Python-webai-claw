@@ -3,7 +3,7 @@
 Status: implementation started. The 1.1.8 release is tagged; keep that tag
 available for rollback while 1.2 is developed on master.
 
-Target version: `1.2.0`
+Target version: `1.2.6`
 
 ## 1. Goals
 

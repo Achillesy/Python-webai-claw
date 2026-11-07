@@ -27,7 +27,7 @@ var noticeUntil = 0;
 
 // Expected host build, from the bundled host-build.json. The build is a
 // monotonic counter that only moves when the host files change (see
-// scripts/sync_host_build.py); the store version stays 1.2.5 across
+// scripts/sync_host_build.py); the store version stays 1.2.6 across
 // host-only fixes, so it cannot tell an outdated host apart. A host
 // reporting a smaller build (or none, for pre-stamp installs) is outdated.
 var expectedHostBuild = null;

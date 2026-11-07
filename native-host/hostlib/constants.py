@@ -8,10 +8,10 @@ import json
 import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HOST_VERSION = "1.2.5"
+HOST_VERSION = "1.2.6"
 
 # Monotonic host build stamp (extension/host-build.json), decoupled from
-# the store version: HOST_VERSION stays 1.2.5 across host-only fixes, so
+# the store version: HOST_VERSION stays 1.2.6 across host-only fixes, so
 # the version alone can never tell the extension the installed host is
 # outdated. install.py copies the stamp into the install directory; the
 # host reports it as host_build in every response. A missing or unreadable
