@@ -65,6 +65,9 @@ All notable changes to webai-claw. Format follows
 - Sponsor QR codes (`sponsor/wechat.jpg`, `sponsor/alipay.jpg`) and a
   Support section in the READMEs, next to the existing Ko-fi/PayPal
   links.
+- `extension/_locales` (en + zh) with `"default_locale": "en"` in the
+  manifest, so both stores offer a Chinese listing: the package now
+  declares the zh locale instead of shipping English only.
 
 ### Changed
 
