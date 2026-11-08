@@ -67,7 +67,9 @@ All notable changes to webai-claw. Format follows
   links.
 - `extension/_locales` (en + zh) with `"default_locale": "en"` in the
   manifest, so both stores offer a Chinese listing: the package now
-  declares the zh locale instead of shipping English only.
+  declares the zh locale, and the manifest's name/description use
+  `__MSG__` placeholders resolved from the locale files (Edge only
+  recognises a locale when the manifest references it this way).
 
 ### Changed
 
