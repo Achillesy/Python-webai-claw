@@ -5,6 +5,13 @@ All notable changes to webai-claw. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Onboarding: the "No Python yet?" install commands (Windows
+  `winget install Python.Python.3.13`, macOS `xcode-select --install`)
+  are now copyable command rows with Copy buttons, like the main install
+  commands.
+
 ## [1.2.6] - 2026-11-07
 
 ### Added
